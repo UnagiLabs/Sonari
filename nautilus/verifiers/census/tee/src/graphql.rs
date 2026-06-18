@@ -14,22 +14,23 @@ const GRAPHQL_REQUEST_TIMEOUT_MS: u64 = 10_000;
 // Sui GraphQL enforces maxPageSize / maxMultiGetSize = 50 for connection pages
 // and multi-get key batches. Larger values fail with "Page size is too large".
 const DEFAULT_CELL_COUNT_BATCH_SIZE: usize = 50;
-const CHECKPOINT_PAGE_SIZE: u64 = 50;
 const EVENT_PAGE_SIZE: u64 = 50;
 const MAX_GRAPHQL_PAGES: usize = 512;
 const DEFAULT_SHARD_CONCURRENCY_LIMIT: usize = 8;
 const DEFAULT_GRAPHQL_MAX_ATTEMPTS: u32 = 4;
 const LATEST_CHECKPOINT_QUERY: &str = r#"
-query SonariCensusLatestCheckpoints($last: Int!, $before: String) {
-  checkpoints(last: $last, before: $before) {
-    nodes {
-      sequenceNumber
-      timestamp
-    }
-    pageInfo {
-      hasPreviousPage
-      startCursor
-    }
+query SonariCensusLatestCheckpoint {
+  checkpoint {
+    sequenceNumber
+    timestamp
+  }
+}
+"#;
+const CHECKPOINT_BY_SEQUENCE_QUERY: &str = r#"
+query SonariCensusCheckpointBySequence($sequenceNumber: UInt53!) {
+  checkpoint(sequenceNumber: $sequenceNumber) {
+    sequenceNumber
+    timestamp
   }
 }
 "#;
@@ -286,40 +287,60 @@ impl CensusGraphqlClient {
         })
     }
 
+    /// Resolves `census_checkpoint` as the latest checkpoint whose timestamp is at or
+    /// before `occurred_at_ms`, via binary search over checkpoint sequence numbers.
+    ///
+    /// Linear backward pagination cannot reach checkpoints more than a few thousand
+    /// behind the chain tip within a bounded page budget, which fails for any disaster
+    /// processed with even a modest delay. Binary search needs only O(log N) point
+    /// lookups (`checkpoint(sequenceNumber:)`), so it resolves any occurrence time the
+    /// chain has retained, independent of how far behind the tip it is.
     fn resolve_latest_checkpoint_at_or_before(
         &self,
         occurred_at_ms: u64,
         max_attempts: u32,
     ) -> Result<u64, CensusError> {
-        let mut before: Option<String> = None;
-        for _ in 0..MAX_GRAPHQL_PAGES {
-            let response = self.query_json(
-                LATEST_CHECKPOINT_QUERY,
-                checkpoint_page_variables(before.as_deref()),
-                max_attempts,
-            )?;
-            match parse_latest_checkpoint_at_or_before(&response, occurred_at_ms) {
-                Ok(checkpoint) => return Ok(checkpoint),
-                Err(error) => {
-                    if !error
-                        .to_string()
-                        .contains("no Sui checkpoint exists at or before occurred_at_ms")
-                    {
-                        return Err(error);
-                    }
-                }
-            }
-            let page_info = read_checkpoint_page_info(&response, "GraphQL checkpoint pageInfo")?;
-            if !page_info.has_previous_page {
-                return Err(CensusError::InvalidPayload(
-                    "no Sui checkpoint exists at or before occurred_at_ms".to_owned(),
-                ));
-            }
-            before = Some(page_info.start_cursor);
+        let (latest_seq, latest_ts) = self.read_checkpoint(None, max_attempts)?;
+        if latest_ts <= occurred_at_ms {
+            return Ok(latest_seq);
         }
-        Err(CensusError::InvalidPayload(
-            "Sui checkpoint pagination exceeded safety limit".to_owned(),
-        ))
+        let (_, genesis_ts) = self.read_checkpoint(Some(0), max_attempts)?;
+        if genesis_ts > occurred_at_ms {
+            return Err(CensusError::InvalidPayload(
+                "no Sui checkpoint exists at or before occurred_at_ms".to_owned(),
+            ));
+        }
+        // Invariant: checkpoint(lo).timestamp <= occurred_at_ms < checkpoint(hi).timestamp.
+        let mut lo = 0u64;
+        let mut hi = latest_seq;
+        while lo < hi {
+            let mid = lo + (hi - lo).div_ceil(2);
+            let (_, mid_ts) = self.read_checkpoint(Some(mid), max_attempts)?;
+            if mid_ts <= occurred_at_ms {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        Ok(lo)
+    }
+
+    fn read_checkpoint(
+        &self,
+        sequence_number: Option<u64>,
+        max_attempts: u32,
+    ) -> Result<(u64, u64), CensusError> {
+        let response = match sequence_number {
+            Some(sequence_number) => self.query_json(
+                CHECKPOINT_BY_SEQUENCE_QUERY,
+                serde_json::json!({ "sequenceNumber": sequence_number }),
+                max_attempts,
+            )?,
+            None => {
+                self.query_json(LATEST_CHECKPOINT_QUERY, serde_json::json!({}), max_attempts)?
+            }
+        };
+        parse_checkpoint_node(&response)
     }
 
     fn collect_event_pages(
@@ -439,13 +460,6 @@ fn counted_cell_from_snapshot(snapshot: CountedCellSnapshot) -> CountedCell {
     }
 }
 
-fn checkpoint_page_variables(before: Option<&str>) -> Value {
-    serde_json::json!({
-        "last": CHECKPOINT_PAGE_SIZE,
-        "before": before,
-    })
-}
-
 fn event_page_variables(event_type: &str, after: Option<&str>) -> Value {
     serde_json::json!({
         "eventType": event_type,
@@ -464,27 +478,9 @@ fn event_response_from_nodes(nodes: Vec<Value>) -> Value {
     })
 }
 
-struct CheckpointPageInfo {
-    has_previous_page: bool,
-    start_cursor: String,
-}
-
 struct EventPageInfo {
     has_next_page: bool,
     end_cursor: String,
-}
-
-fn read_checkpoint_page_info(
-    response: &Value,
-    field: &str,
-) -> Result<CheckpointPageInfo, CensusError> {
-    let page_info = read_path(response, &["data", "checkpoints", "pageInfo"], field)?;
-    let has_previous_page = read_bool_field(page_info, "hasPreviousPage")?;
-    let start_cursor = read_cursor_field(page_info, "startCursor", has_previous_page)?;
-    Ok(CheckpointPageInfo {
-        has_previous_page,
-        start_cursor,
-    })
 }
 
 fn read_event_page_info(response: &Value, field: &str) -> Result<EventPageInfo, CensusError> {
@@ -514,36 +510,17 @@ fn read_cursor_field(value: &Value, field: &str, required: bool) -> Result<Strin
     }
 }
 
-pub fn parse_latest_checkpoint_at_or_before(
-    response: &Value,
-    occurred_at_ms: u64,
-) -> Result<u64, CensusError> {
-    let nodes = read_array_path(
-        response,
-        &["data", "checkpoints", "nodes"],
-        "checkpoint nodes",
+/// Parses a single `checkpoint { sequenceNumber timestamp }` GraphQL node into
+/// `(sequence_number, timestamp_ms)`. The Sui GraphQL `DateTime` scalar is RFC3339
+/// UTC (e.g. `2024-01-01T07:10:09.476Z`), not a millisecond integer.
+pub fn parse_checkpoint_node(response: &Value) -> Result<(u64, u64), CensusError> {
+    let node = read_path(response, &["data", "checkpoint"], "checkpoint")?;
+    let sequence_number = read_u64_path(node, &["sequenceNumber"], "checkpoint sequenceNumber")?;
+    let timestamp_ms = parse_rfc3339_utc_ms(
+        read_string_path(node, &["timestamp"], "checkpoint timestamp")?,
+        "checkpoint timestamp",
     )?;
-    let mut latest: Option<u64> = None;
-    for node in nodes {
-        let sequence_number =
-            read_u64_path(node, &["sequenceNumber"], "checkpoint sequenceNumber")?;
-        // Sui GraphQL exposes the checkpoint time as the `DateTime` scalar
-        // (RFC3339 UTC, e.g. `2024-01-01T07:10:09.476Z`), not a millisecond integer.
-        let timestamp_ms = parse_rfc3339_utc_ms(
-            read_string_path(node, &["timestamp"], "checkpoint timestamp")?,
-            "checkpoint timestamp",
-        )?;
-        if timestamp_ms <= occurred_at_ms
-            && latest.is_none_or(|previous| previous < sequence_number)
-        {
-            latest = Some(sequence_number);
-        }
-    }
-    latest.ok_or_else(|| {
-        CensusError::InvalidPayload(
-            "no Sui checkpoint exists at or before occurred_at_ms".to_owned(),
-        )
-    })
+    Ok((sequence_number, timestamp_ms))
 }
 
 pub fn parse_cell_count_index_metadata(
@@ -686,6 +663,21 @@ pub fn parse_shard_count_response(
     response: &Value,
     expected_cells: &[(u64, u8)],
 ) -> Result<Vec<CountedCellSnapshot>, CensusError> {
+    // `object(atCheckpoint:)` returns null when the shard object did not exist at the
+    // census checkpoint (e.g. the shard was lazily created after occurred_at_ms). Per
+    // the "missing -> 0" rule, treat every queried cell in that shard as active_count 0.
+    let object = read_path(response, &["data", "object"], "GraphQL object")?;
+    if object.is_null() {
+        return Ok(expected_cells
+            .iter()
+            .map(|(h3_cell, cell_band)| CountedCellSnapshot {
+                h3_cell: *h3_cell,
+                cell_band: *cell_band,
+                shard_id: *h3_cell % crate::SHARD_COUNT,
+                active_count: 0,
+            })
+            .collect());
+    }
     let fields = read_array_path(
         response,
         &["data", "object", "multiGetDynamicFields"],
@@ -963,12 +955,11 @@ fn same_object_id(left: &str, right: &str) -> bool {
 mod tests {
     use super::{
         CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, CENSUS_GRAPHQL_NETWORK_KEY, CensusGraphqlClient,
-        ShardCountReadConfig, SuiGraphqlNetwork, checkpoint_page_variables,
-        event_response_from_nodes, graphql_event_nodes, group_affected_cells_by_shard,
-        h3_cell_dynamic_field_key, parse_cell_count_index_metadata,
-        parse_cell_count_shard_object_ids, parse_latest_checkpoint_at_or_before,
-        parse_rfc3339_utc_ms, parse_shard_count_response, read_checkpoint_page_info,
-        read_event_page_info, shard_count_batches, shard_count_query_variables,
+        ShardCountReadConfig, SuiGraphqlNetwork, event_response_from_nodes, graphql_event_nodes,
+        group_affected_cells_by_shard, h3_cell_dynamic_field_key, parse_cell_count_index_metadata,
+        parse_cell_count_shard_object_ids, parse_checkpoint_node, parse_rfc3339_utc_ms,
+        parse_shard_count_response, read_event_page_info, shard_count_batches,
+        shard_count_query_variables,
     };
     use crate::AffectedCell;
     use sonari_tee_core::TeeContext;
@@ -1038,66 +1029,21 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_parser_selects_latest_checkpoint_at_or_before_event_time() {
+    fn checkpoint_node_parser_reads_sequence_and_timestamp_ms() {
         let response = serde_json::json!({
             "data": {
-                "checkpoints": {
-                    "nodes": [
-                        { "sequenceNumber": "40", "timestamp": "1970-01-01T00:00:00.900Z" },
-                        { "sequenceNumber": "41", "timestamp": "1970-01-01T00:00:01Z" },
-                        { "sequenceNumber": "42", "timestamp": "1970-01-01T00:00:01.001Z" }
-                    ]
-                }
+                "checkpoint": { "sequenceNumber": "41", "timestamp": "1970-01-01T00:00:01.001Z" }
             }
         });
 
-        assert_eq!(
-            parse_latest_checkpoint_at_or_before(&response, 1_000).unwrap(),
-            41,
-        );
+        assert_eq!(parse_checkpoint_node(&response).unwrap(), (41, 1_001));
     }
 
     #[test]
-    fn checkpoint_parser_rejects_when_no_checkpoint_is_old_enough() {
-        let response = serde_json::json!({
-            "data": { "checkpoints": { "nodes": [{ "sequenceNumber": 1, "timestamp": "1970-01-01T00:00:00.010Z" }] } }
-        });
+    fn checkpoint_node_parser_fails_closed_on_missing_checkpoint() {
+        let response = serde_json::json!({ "data": { "checkpoint": null } });
 
-        let error = parse_latest_checkpoint_at_or_before(&response, 9).unwrap_err();
-
-        assert!(error.to_string().contains("checkpoint"));
-    }
-
-    #[test]
-    fn checkpoint_page_info_drives_backfill_when_recent_page_is_too_new() {
-        let response = serde_json::json!({
-            "data": {
-                "checkpoints": {
-                    "nodes": [
-                        { "sequenceNumber": "90", "timestamp": "1970-01-01T00:00:02Z" },
-                        { "sequenceNumber": "91", "timestamp": "1970-01-01T00:00:02.010Z" }
-                    ],
-                    "pageInfo": {
-                        "hasPreviousPage": true,
-                        "startCursor": "checkpoint-cursor-90"
-                    }
-                }
-            }
-        });
-
-        assert!(parse_latest_checkpoint_at_or_before(&response, 1_000).is_err());
-
-        let page_info =
-            read_checkpoint_page_info(&response, "GraphQL checkpoint pageInfo").unwrap();
-
-        assert!(page_info.has_previous_page);
-        assert_eq!(
-            checkpoint_page_variables(Some(&page_info.start_cursor)),
-            serde_json::json!({
-                "last": 50,
-                "before": "checkpoint-cursor-90"
-            }),
-        );
+        assert!(parse_checkpoint_node(&response).is_err());
     }
 
     #[test]
@@ -1479,6 +1425,20 @@ mod tests {
                 .to_string()
                 .contains("length")
         );
+    }
+
+    #[test]
+    fn shard_count_parser_reads_missing_shard_object_as_zero() {
+        // `object(atCheckpoint:)` returns null when the shard object did not exist at the
+        // checkpoint (e.g. lazily created after occurred_at_ms): every cell counts as zero.
+        let response = serde_json::json!({ "data": { "object": null } });
+
+        let counted = parse_shard_count_response(&response, &[(4_191, 1), (8_287, 2)]).unwrap();
+
+        assert_eq!(counted.len(), 2);
+        assert!(counted.iter().all(|cell| cell.active_count == 0));
+        assert_eq!(counted[0].h3_cell, 4_191);
+        assert_eq!(counted[0].shard_id, 4_191 % 4_096);
     }
 
     fn object_id(byte: &str) -> String {
