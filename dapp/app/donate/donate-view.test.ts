@@ -58,7 +58,7 @@ describe("/donate wallet section removal", () => {
     it("寄付画面の主要な経路は残す", () => {
         expect(donateViewSource).toContain('<SiteTopbar active="donate" locale={locale} />');
         expect(donateViewSource).toContain("<EmergencyBanner");
-        expect(donateViewSource).toContain('className="donate-layout"');
+        expect(donateViewSource).toContain("donate-layout");
         expect(donateViewSource).toContain('className="donate-form"');
         expect(donateViewSource).toContain("executeWalletTransaction");
     });
@@ -153,7 +153,7 @@ describe("DonateView initialMode / initialCampaignId / lockDestination props", (
         // 既存の非回帰トークン
         expect(donateViewSource).toContain('<SiteTopbar active="donate" locale={locale} />');
         expect(donateViewSource).toContain("<EmergencyBanner");
-        expect(donateViewSource).toContain('className="donate-layout"');
+        expect(donateViewSource).toContain("donate-layout");
         expect(donateViewSource).toContain('className="donate-form"');
         expect(donateViewSource).toContain("executeWalletTransaction");
     });

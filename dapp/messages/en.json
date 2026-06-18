@@ -898,13 +898,9 @@
         "backToPools": "Back to disaster relief pools",
         "mapTitle": "Affected area",
         "mapUnavailable": "The affected area map is not available yet for this disaster.",
-        "regionLabel": "Region",
         "affectedCellsLabel": "Affected cells",
         "donationEndLabel": "Donation deadline",
-        "claimEndLabel": "Claim deadline",
         "balanceLabel": "Pool balance",
-        "totalDonatedLabel": "Total donated",
-        "totalPaidLabel": "Total paid out",
         "statusLabel": "Status",
         "status": {
             "active": "Active",

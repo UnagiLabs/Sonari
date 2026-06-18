@@ -898,13 +898,9 @@
         "backToPools": "災害特設救援プール一覧に戻る",
         "mapTitle": "被災エリア",
         "mapUnavailable": "この災害の被災エリア地図はまだ利用できません。",
-        "regionLabel": "地域",
         "affectedCellsLabel": "被影響セル数",
         "donationEndLabel": "寄付受付締切",
-        "claimEndLabel": "申請受付締切",
         "balanceLabel": "プール残高",
-        "totalDonatedLabel": "累計受入額",
-        "totalPaidLabel": "累計支払額",
         "statusLabel": "ステータス",
         "status": {
             "active": "受付中",

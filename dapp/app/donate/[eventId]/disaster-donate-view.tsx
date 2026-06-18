@@ -229,46 +229,31 @@ export function DisasterDonateView({
                         <div>
                             <div className="eyebrow">{t("title")}</div>
                             <h1>{view.title}</h1>
+                            <p className="muted">{view.region}</p>
                         </div>
                     </header>
 
-                    {/* 災害情報サマリ。見出しはヒーローの h1 と重複するため置かず、
-                        section に aria-label を付けてアクセシビリティを担保する。 */}
-                    <section className="claim-event-panel" aria-label={view.title}>
-                        <dl className="pass-grid">
-                            <div>
-                                <dt>{t("regionLabel")}</dt>
-                                <dd>{view.region}</dd>
+                    {/* 主要指標を簡潔な strip で見せる（被災セル数・寄付締切・残高・状態）。
+                        地域はヒーロー副題に出すため、ここでは出さない。 */}
+                    <section className="metrics-strip" aria-label={view.title}>
+                        <article className="metric-item">
+                            <div className="label">{t("affectedCellsLabel")}</div>
+                            <div className="value">{view.affectedCellCount.toLocaleString()}</div>
+                        </article>
+                        <article className="metric-item">
+                            <div className="label">{t("donationEndLabel")}</div>
+                            <div className="value">
+                                {formatDate(view.donationEndMs, locale) ?? "-"}
                             </div>
-                            <div>
-                                <dt>{t("affectedCellsLabel")}</dt>
-                                <dd>{view.affectedCellCount.toLocaleString()}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("donationEndLabel")}</dt>
-                                <dd>{formatDate(view.donationEndMs, locale) ?? "-"}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("claimEndLabel")}</dt>
-                                <dd>{formatDate(view.claimEndMs, locale) ?? "-"}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("balanceLabel")}</dt>
-                                <dd>{view.balanceLabel}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("totalDonatedLabel")}</dt>
-                                <dd>{view.totalDonatedLabel}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("totalPaidLabel")}</dt>
-                                <dd>{view.totalPaidLabel}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("statusLabel")}</dt>
-                                <dd>{t(`status.${view.status}`)}</dd>
-                            </div>
-                        </dl>
+                        </article>
+                        <article className="metric-item">
+                            <div className="label">{t("balanceLabel")}</div>
+                            <div className="value">{view.balanceLabel}</div>
+                        </article>
+                        <article className="metric-item">
+                            <div className="label">{t("statusLabel")}</div>
+                            <div className="value">{t(`status.${view.status}`)}</div>
+                        </article>
                     </section>
 
                     {/* 被災エリア地図。artifact が無い（env 未設定 / 未生成）ときも

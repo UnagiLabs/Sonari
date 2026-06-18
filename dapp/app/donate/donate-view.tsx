@@ -582,8 +582,45 @@ export function DonateView({
         }
     }
 
+    // 送金結果（ステータス）パネル。embedded / 通常どちらでも使うため抽出する。
+    const resultPanel = (
+        <section className="preview-block">
+            <div className="panel-header compact">
+                <div>
+                    <div className="eyebrow">{t("result.eyebrow")}</div>
+                    <h2>{t("result.title")}</h2>
+                </div>
+            </div>
+            <div className={statusClass}>
+                {resultView.loading ? (
+                    <LoadingIndicator label={txMessage()} />
+                ) : (
+                    <strong>{txMessage()}</strong>
+                )}
+                <small>{txDetail()}</small>
+                {resultView.digest !== null ? (
+                    <small className="faint">{resultView.digest}</small>
+                ) : null}
+                {resultView.explorerUrl !== null ? (
+                    <a
+                        className="text-action"
+                        href={resultView.explorerUrl}
+                        rel="noopener noreferrer"
+                        target="_blank"
+                    >
+                        {t("tx.submitted.explorerLink")}
+                    </a>
+                ) : null}
+                {resultView.canRetry ? <small>{t("tx.failed.retryHint")}</small> : null}
+            </div>
+        </section>
+    );
+
     const donateForm = (
-        <section className="donate-layout" aria-label={t("form.title")}>
+        <section
+            className={`donate-layout${embedded ? " donate-layout-embedded" : ""}`}
+            aria-label={t("form.title")}
+        >
             <form className="donate-form" aria-labelledby="donation-form-title">
                 <div className="form-heading">
                     <div>
@@ -783,67 +820,44 @@ export function DonateView({
                 </div>
             </form>
 
-            <aside className="donate-side" aria-label={t("split.title")}>
-                <section className="preview-block">
-                    <div className="panel-header compact">
-                        <div>
-                            <div className="eyebrow">{t("split.eyebrow")}</div>
-                            <h2>{t("split.title")}</h2>
-                        </div>
-                        <span className="stat-num">{selectedAmountLabel}</span>
-                    </div>
-                    <div className="split-list">
-                        {splitRows.map((row) => (
-                            <div className="split-row" key={row.key}>
-                                <div>
-                                    <strong>{row.label}</strong>
-                                    <small>{row.detail}</small>
-                                </div>
-                                <span>{row.value}</span>
+            {embedded ? (
+                // embedded（/donate/[eventId]）では分配プレビューと DonorPass ノートを出さず、
+                // フォーム＋送金結果だけの単一カラムにしてシンプルにする。
+                resultPanel
+            ) : (
+                <aside className="donate-side" aria-label={t("split.title")}>
+                    <section className="preview-block">
+                        <div className="panel-header compact">
+                            <div>
+                                <div className="eyebrow">{t("split.eyebrow")}</div>
+                                <h2>{t("split.title")}</h2>
                             </div>
-                        ))}
-                    </div>
-                </section>
-
-                <section className="preview-block">
-                    <div className="panel-header compact">
-                        <div>
-                            <div className="eyebrow">{t("result.eyebrow")}</div>
-                            <h2>{t("result.title")}</h2>
+                            <span className="stat-num">{selectedAmountLabel}</span>
                         </div>
-                    </div>
-                    <div className={statusClass}>
-                        {resultView.loading ? (
-                            <LoadingIndicator label={txMessage()} />
-                        ) : (
-                            <strong>{txMessage()}</strong>
-                        )}
-                        <small>{txDetail()}</small>
-                        {resultView.digest !== null ? (
-                            <small className="faint">{resultView.digest}</small>
-                        ) : null}
-                        {resultView.explorerUrl !== null ? (
-                            <a
-                                className="text-action"
-                                href={resultView.explorerUrl}
-                                rel="noopener noreferrer"
-                                target="_blank"
-                            >
-                                {t("tx.submitted.explorerLink")}
-                            </a>
-                        ) : null}
-                        {resultView.canRetry ? <small>{t("tx.failed.retryHint")}</small> : null}
-                    </div>
-                </section>
+                        <div className="split-list">
+                            {splitRows.map((row) => (
+                                <div className="split-row" key={row.key}>
+                                    <div>
+                                        <strong>{row.label}</strong>
+                                        <small>{row.detail}</small>
+                                    </div>
+                                    <span>{row.value}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
 
-                <section className="donate-note">
-                    <h3>{t("note.title")}</h3>
-                    <p>{t("note.body")}</p>
-                    <a className="text-action" href="/dashboard">
-                        {t("note.link")}
-                    </a>
-                </section>
-            </aside>
+                    {resultPanel}
+
+                    <section className="donate-note">
+                        <h3>{t("note.title")}</h3>
+                        <p>{t("note.body")}</p>
+                        <a className="text-action" href="/dashboard">
+                            {t("note.link")}
+                        </a>
+                    </section>
+                </aside>
+            )}
         </section>
     );
 

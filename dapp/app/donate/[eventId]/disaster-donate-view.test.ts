@@ -100,13 +100,9 @@ describe("disasterDonate i18n キー整合", () => {
         "backToPools",
         "mapTitle",
         "mapUnavailable",
-        "regionLabel",
         "affectedCellsLabel",
         "donationEndLabel",
-        "claimEndLabel",
         "balanceLabel",
-        "totalDonatedLabel",
-        "totalPaidLabel",
         "statusLabel",
     ];
 
