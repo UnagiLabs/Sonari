@@ -48,7 +48,11 @@ function campaignObjectJson(overrides: Record<string, unknown> = {}): Record<str
         terms: { round_interval_ms: "100" },
         floor_amount_by_band: ["100", "200", "300"],
         round_payout_by_band: ["1000", "2000", "3000"],
+        balance: { value: "5000000" },
+        total_donated_usdc: "8000000",
+        total_paid_usdc: "3000000",
         closed: false,
+        paused: false,
         ...overrides,
     };
 }
@@ -123,6 +127,69 @@ describe("claim campaign parsing", () => {
         });
         expect(parseClaimApplicationObject(claimApplicationJson({ verified: "yes" }))).toBeNull();
     });
+
+    it("parses balance in { value } struct form into balanceUsdc as number", () => {
+        const result = parseCampaignObject(
+            CAMPAIGN_ID,
+            campaignObjectJson({ balance: { value: "1000000" } }),
+        );
+        expect(result).not.toBeNull();
+        expect(result?.balanceUsdc).toBe(1000000);
+    });
+
+    it("parses balance in direct u64 string form into balanceUsdc as number", () => {
+        const result = parseCampaignObject(
+            CAMPAIGN_ID,
+            campaignObjectJson({ balance: "1000000" }),
+        );
+        expect(result).not.toBeNull();
+        expect(result?.balanceUsdc).toBe(1000000);
+    });
+
+    it("parses balance in direct u64 number form into balanceUsdc as number", () => {
+        const result = parseCampaignObject(
+            CAMPAIGN_ID,
+            campaignObjectJson({ balance: 1000000 }),
+        );
+        expect(result).not.toBeNull();
+        expect(result?.balanceUsdc).toBe(1000000);
+    });
+
+    it("sets balanceUsdc to null when balance is missing, but Campaign object is still returned", () => {
+        const json = campaignObjectJson();
+        const { balance: _balance, ...withoutBalance } = json;
+        const result = parseCampaignObject(CAMPAIGN_ID, withoutBalance);
+        expect(result).not.toBeNull();
+        expect(result?.balanceUsdc).toBeNull();
+    });
+
+    it("sets totalDonatedUsdc and totalPaidUsdc to null when missing, but Campaign is still returned", () => {
+        const json = campaignObjectJson();
+        const { total_donated_usdc: _donated, total_paid_usdc: _paid, ...withoutTotals } = json;
+        const result = parseCampaignObject(CAMPAIGN_ID, withoutTotals);
+        expect(result).not.toBeNull();
+        expect(result?.totalDonatedUsdc).toBeNull();
+        expect(result?.totalPaidUsdc).toBeNull();
+    });
+
+    it("parses closed and paused as booleans", () => {
+        const result = parseCampaignObject(
+            CAMPAIGN_ID,
+            campaignObjectJson({ closed: true, paused: true }),
+        );
+        expect(result).not.toBeNull();
+        expect(result?.closed).toBe(true);
+        expect(result?.paused).toBe(true);
+    });
+
+    it("sets closed and paused to null when missing, but Campaign is still returned", () => {
+        const json = campaignObjectJson();
+        const { closed: _closed, paused: _paused, ...withoutFlags } = json;
+        const result = parseCampaignObject(CAMPAIGN_ID, withoutFlags);
+        expect(result).not.toBeNull();
+        expect(result?.closed).toBeNull();
+        expect(result?.paused).toBeNull();
+    });
 });
 
 describe("deriveClaimCampaignState", () => {
@@ -153,6 +220,11 @@ describe("deriveClaimCampaignState", () => {
             currentRound: "1",
             roundFinalizedAtMs: "1800",
             roundIntervalMs: "100",
+            balanceUsdc: 5000000,
+            totalDonatedUsdc: 8000000,
+            totalPaidUsdc: 3000000,
+            closed: false,
+            paused: false,
         });
     });
 

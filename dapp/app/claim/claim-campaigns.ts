@@ -51,6 +51,11 @@ export interface ClaimCampaignObjectData {
     readonly currentRound: string;
     readonly roundFinalizedAtMs: string;
     readonly roundIntervalMs: string;
+    readonly balanceUsdc: number | null;
+    readonly totalDonatedUsdc: number | null;
+    readonly totalPaidUsdc: number | null;
+    readonly closed: boolean | null;
+    readonly paused: boolean | null;
 }
 
 export interface ClaimDisasterEventObjectData {
@@ -84,6 +89,11 @@ export interface ClaimCampaignState {
     readonly currentRound: string;
     readonly roundFinalizedAtMs: string;
     readonly roundIntervalMs: string;
+    readonly balanceUsdc: number | null;
+    readonly totalDonatedUsdc: number | null;
+    readonly totalPaidUsdc: number | null;
+    readonly closed: boolean | null;
+    readonly paused: boolean | null;
 }
 
 export interface ClaimApplicationData {
@@ -182,6 +192,13 @@ export function parseCampaignObject(
         return null;
     }
 
+    // 資金フィールドは optional: 欠損・不正でも Campaign 自体は返す（guard に組み込まない）
+    const balanceUsdc = parseBalanceValueAsNumber(json.balance);
+    const totalDonatedUsdc = parseU64Number(json.total_donated_usdc);
+    const totalPaidUsdc = parseU64Number(json.total_paid_usdc);
+    const closed = parseBoolean(json.closed);
+    const paused = parseBoolean(json.paused);
+
     return {
         campaignId,
         disasterEventId,
@@ -194,6 +211,11 @@ export function parseCampaignObject(
         currentRound,
         roundFinalizedAtMs,
         roundIntervalMs,
+        balanceUsdc,
+        totalDonatedUsdc,
+        totalPaidUsdc,
+        closed,
+        paused,
     };
 }
 
@@ -305,6 +327,11 @@ export function deriveClaimCampaignState(
         currentRound: campaign.currentRound,
         roundFinalizedAtMs: campaign.roundFinalizedAtMs,
         roundIntervalMs: campaign.roundIntervalMs,
+        balanceUsdc: campaign.balanceUsdc,
+        totalDonatedUsdc: campaign.totalDonatedUsdc,
+        totalPaidUsdc: campaign.totalPaidUsdc,
+        closed: campaign.closed,
+        paused: campaign.paused,
     };
 }
 
@@ -708,4 +735,33 @@ function parseU64String(value: unknown): string | null {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+// Balance<USDC> は Sui gRPC で { value: "..." } 形または直接 u64 形（文字列 or 数値）で来る。
+// dashboard-chain.ts の parseBalanceValue 相当だが、表示用途のため number で保持する。
+// u64 が Number.MAX_SAFE_INTEGER (2^53-1) を超えると精度が失われるが、
+// USDC の micro 単位でその値は現実的でないため number で保持する。
+function parseBalanceValueAsNumber(raw: unknown): number | null {
+    if (isRecord(raw)) {
+        return parseU64Number(raw.value);
+    }
+    return parseU64Number(raw);
+}
+
+function parseU64Number(value: unknown): number | null {
+    if (typeof value === "number") {
+        if (!Number.isSafeInteger(value) || value < 0) {
+            return null;
+        }
+        return value;
+    }
+    if (typeof value !== "string") {
+        return null;
+    }
+    const trimmed = value.trim();
+    if (!/^(0|[1-9]\d*)$/u.test(trimmed)) {
+        return null;
+    }
+    const parsed = Number(trimmed);
+    return Number.isSafeInteger(parsed) ? parsed : null;
 }
