@@ -16,14 +16,14 @@ import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { computeIdentityStatementHash } from "@sonari/proof-core";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoadingIndicator } from "../../components/loading-indicator";
 import { SiteTopbar } from "../../i18n/site-topbar";
 import { type MembershipPassData, readMembershipPass } from "../../mypage/membership-pass-read";
 import { MEMBERSHIP_TERMS_VERSION } from "../../register/terms-version";
 import type { SonariLocale } from "../../register/wizard/locale";
 import { dAppKit } from "../../wallet/dapp-kit";
-import { LoginEntryPoint, LoginEntryPointFallback } from "../../wallet/login-entry-point";
+import { WalletConnect } from "../../wallet/wallet-connect";
 import { readWalletNetwork } from "../../wallet/wallet-network";
 import { executeWalletTransaction } from "../../wallet/wallet-transaction-adapter";
 import { AffectedAreaMap } from "../affected-area/affected-area-map";
@@ -615,9 +615,7 @@ export function ClaimDetailView({
                         <div className="claim-wallet-panel">
                             <span className="tag tag-neutral">{t("hero.walletTag")}</span>
                             <p>{t("hero.walletBody")}</p>
-                            <Suspense fallback={<LoginEntryPointFallback />}>
-                                <LoginEntryPoint />
-                            </Suspense>
+                            <WalletConnect />
                         </div>
                     </header>
 

@@ -2,11 +2,10 @@
 
 import Image from "next/image";
 import { useTranslations } from "next-intl";
-import { Suspense } from "react";
 import type { SonariLocale } from "../register/wizard/locale";
 import { LocaleSwitcher } from "../register/wizard/locale-switcher";
-import { LoginEntryPoint, LoginEntryPointFallback } from "../wallet/login-entry-point";
 import { NetworkMismatchBanner } from "../wallet/network-mismatch-banner";
+import { WalletConnect } from "../wallet/wallet-connect";
 import { SiteMobileMenu } from "./site-mobile-menu";
 import { NAV_DEFS, type NavKey, type ResolvedNavItem, resolveNavItems } from "./topbar-nav";
 
@@ -65,9 +64,7 @@ export function SiteTopbar({
                     </nav>
                     <div className="topbar-spacer" />
                     <LocaleSwitcher current={locale} />
-                    <Suspense fallback={<LoginEntryPointFallback />}>
-                        <LoginEntryPoint />
-                    </Suspense>
+                    <WalletConnect />
                     <a
                         className={`nav-item topbar-mypage${active === "mypage" ? " active" : ""}`}
                         href={MYPAGE_ITEM.href}

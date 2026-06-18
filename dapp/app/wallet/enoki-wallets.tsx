@@ -15,13 +15,21 @@ type RegisterConfiguredEnokiWalletsInput = {
     readonly configResult: EnokiConfigResult;
     readonly network: WalletNetwork;
     readonly client: ClientWithCoreApi;
+    readonly redirectUrl: string;
     readonly register?: RegisterEnokiWallets;
 };
+
+type EnokiRedirectLocation = Pick<Location, "origin">;
+
+export function resolveEnokiRedirectUrl(location: EnokiRedirectLocation): string {
+    return new URL("/", location.origin).toString();
+}
 
 export function registerConfiguredEnokiWallets({
     configResult,
     network,
     client,
+    redirectUrl,
     register = registerEnokiWallets,
 }: RegisterConfiguredEnokiWalletsInput): (() => void) | undefined {
     if (configResult.kind !== "enabled" || network !== "testnet") {
@@ -35,6 +43,7 @@ export function registerConfiguredEnokiWallets({
         providers: {
             google: {
                 clientId: configResult.config.googleClientId,
+                redirectUrl,
             },
         },
     });
@@ -51,6 +60,7 @@ export function RegisterEnokiWallets() {
             configResult: readEnokiConfig(),
             network,
             client,
+            redirectUrl: resolveEnokiRedirectUrl(window.location),
         });
     }, [client, network]);
 

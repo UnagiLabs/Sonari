@@ -64,13 +64,8 @@ describe("/donate wallet section removal", () => {
     });
 
     it("ヘッダーの Wallet 接続は残す", () => {
-        expect(siteTopbarSource).toContain(
-            'import { LoginEntryPoint, LoginEntryPointFallback } from "../wallet/login-entry-point";',
-        );
-        expect(siteTopbarSource).toContain(
-            "<Suspense fallback={<LoginEntryPointFallback />}>",
-        );
-        expect(siteTopbarSource).toContain("<LoginEntryPoint />");
+        expect(siteTopbarSource).toContain('import { WalletConnect } from "../wallet/wallet-connect";');
+        expect(siteTopbarSource).toContain("<WalletConnect />");
     });
 
     it("donate hero に空の右カラムと不要な panel CSS を残さない", () => {
