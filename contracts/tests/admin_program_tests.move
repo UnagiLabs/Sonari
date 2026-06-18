@@ -62,7 +62,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
     assert!(cell_count_index_h3_resolution_from_event == 7u8);
     assert!(cell_count_index_shard_count_from_event == 4096u64);
 
-    let cell_count_shard_events = event::events_by_type<cell_count_index::CellCountShardCreated>();
+    let cell_count_shard_events = event::events_by_type<cell_count_index::CellCountShardPublished>();
     assert!(cell_count_shard_events.length() == 0);
 
     let verifier_events = event::events_by_type<metadata_verifier::RegistryCreated>();

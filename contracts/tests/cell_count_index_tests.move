@@ -96,18 +96,18 @@ fun first_increment_lazily_creates_shard_and_cell_count() {
         assert!(cell_count_index::has_shard_for_testing(&index, shard_id));
         assert!(reader::read_cell_count_or_zero(&index, H3_CELL) == 1);
 
-        let emitted = event::events_by_type<cell_count_index::CellCountShardCreated>();
+        let emitted = event::events_by_type<cell_count_index::CellCountShardPublished>();
         assert!(emitted.length() == 1);
         let (
-            event_index_id,
+            event_package_id,
+            event_cell_count_index_id,
             event_shard_object_id,
-            event_shard_index_id,
             event_shard_id,
             event_actor,
-        ) = cell_count_index::cell_count_shard_created_event_fields(*emitted.borrow(0));
-        assert!(event_index_id == index_id);
+        ) = cell_count_index::cell_count_shard_published_event_fields(*emitted.borrow(0));
+        assert!(event_package_id == cell_count_index::package_id_for_testing());
+        assert!(event_cell_count_index_id == index_id);
         assert!(event_shard_object_id == cell_count_index::shard_object_id_for_testing(&index, shard_id));
-        assert!(event_shard_index_id == index_id);
         assert!(event_shard_id == shard_id);
         assert!(event_actor == ADMIN);
 
@@ -137,7 +137,7 @@ fun second_increment_in_same_shard_increments_existing_count() {
         assert!(reader::read_cell_count_or_zero(&index, SAME_SHARD_H3_CELL) == 1);
         assert!(cell_count_index::shard_object_id_for_testing(&index, shard_id) == shard_object_id);
 
-        let emitted = event::events_by_type<cell_count_index::CellCountShardCreated>();
+        let emitted = event::events_by_type<cell_count_index::CellCountShardPublished>();
         assert!(emitted.length() == 1);
 
         test_scenario::return_shared(index);

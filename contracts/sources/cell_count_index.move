@@ -39,11 +39,11 @@ public struct CellCountIndexPublished has copy, drop {
     actor: address,
 }
 
-public struct CellCountShardCreated has copy, drop {
-    index_id: ID,
-    shard_object_id: ID,
-    shard_index_id: ID,
+public struct CellCountShardPublished has copy, drop {
+    package_id: ID,
+    cell_count_index_id: ID,
     shard_id: u64,
+    shard_object_id: ID,
     actor: address,
 }
 
@@ -154,14 +154,13 @@ fun ensure_shard(index: &mut CellCountIndex, shard_id: u64, ctx: &mut TxContext)
         shard_id,
     };
     let shard_object_id = object::id(&shard);
-    let shard_index_id = shard.index_id;
     dynamic_object_field::add(&mut index.id, shard_id, shard);
 
-    event::emit(CellCountShardCreated {
-        index_id: object::id(index),
-        shard_object_id,
-        shard_index_id,
+    event::emit(CellCountShardPublished {
+        package_id: package_id(),
+        cell_count_index_id: object::id(index),
         shard_id,
+        shard_object_id,
         actor: ctx.sender(),
     });
 }
@@ -269,15 +268,15 @@ public fun cell_count_index_published_event_fields(
 }
 
 #[test_only]
-public fun cell_count_shard_created_event_fields(
-    event: CellCountShardCreated,
+public fun cell_count_shard_published_event_fields(
+    event: CellCountShardPublished,
 ): (ID, ID, ID, u64, address) {
-    let CellCountShardCreated {
-        index_id,
-        shard_object_id,
-        shard_index_id,
+    let CellCountShardPublished {
+        package_id,
+        cell_count_index_id,
         shard_id,
+        shard_object_id,
         actor,
     } = event;
-    (index_id, shard_object_id, shard_index_id, shard_id, actor)
+    (package_id, cell_count_index_id, shard_object_id, shard_id, actor)
 }
