@@ -7,6 +7,7 @@ Next.js (App Router) web app for Sonari — the donation, registration, and clai
 
 ## Where to Read More
 - [../README.md](../README.md) — project overview & documentation index
+- [../docs/internal/operations/enoki_membership_smoke.md](../docs/internal/operations/enoki_membership_smoke.md) — Enoki / Google zkLogin / gasless MembershipPass testnet smoke and secret rotation runbook
 
 ## Enoki / Google zkLogin Testnet Setup
 
@@ -53,6 +54,10 @@ it to the Cloudflare Worker runtime secret before deploy.
 gh secret set ENOKI_PRIVATE_API_KEY -R UnagiLabs/Sonari -e cloudflare-dapp-worker --body "<ENOKI_PRIVATE_API_KEY>"
 ```
 
+For local, preview, deployed testnet smoke, expected failures, and rotation,
+use the operations runbook:
+[../docs/internal/operations/enoki_membership_smoke.md](../docs/internal/operations/enoki_membership_smoke.md).
+
 ---
 
 # Sonari dapp（日本語）
@@ -64,6 +69,7 @@ Sonari の Next.js（App Router）Web アプリ。寄付・登録・claim の UI
 
 ## 詳細資料
 - [../README.md](../README.md) — プロジェクト概要・ドキュメント索引
+- [../docs/internal/operations/enoki_membership_smoke.md](../docs/internal/operations/enoki_membership_smoke.md) — Enoki / Google zkLogin / gasless MembershipPass の testnet smoke と secret rotation runbook
 
 ## Enoki / Google zkLogin testnet 設定
 
@@ -107,3 +113,7 @@ secret へ同期します。
 ```bash
 gh secret set ENOKI_PRIVATE_API_KEY -R UnagiLabs/Sonari -e cloudflare-dapp-worker --body "<ENOKI_PRIVATE_API_KEY>"
 ```
+
+local、preview、deployed testnet の smoke、expected failure、rotation は
+運用 runbook を参照してください:
+[../docs/internal/operations/enoki_membership_smoke.md](../docs/internal/operations/enoki_membership_smoke.md)。

@@ -6,6 +6,7 @@ Operational runbooks and setup guides for running Sonari's contract publish, AWS
 - [./admin_setup.md](./admin_setup.md) — admin / genesis setup: manual contract publish, admin wallet handling, GitHub Variables and PCR registration ordering
 - [./verifier_runner.md](./verifier_runner.md) — Sonari verifier runner AWS stack runbook: deploy, PCR config, smoke acceptance, Floor Census, troubleshooting
 - [./membership_runner.md](./membership_runner.md) — membership identity AWS runner runbook: artifact build, deploy, World ID verification, VerifierRegistry registration, Sui submit
+- [./enoki_membership_smoke.md](./enoki_membership_smoke.md) — Enoki / Google zkLogin / gasless MembershipPass testnet smoke and secret rotation runbook
 - [./aws_smoke.md](./aws_smoke.md) — AWS smoke scripts: `pnpm aws:*` verification/smoke commands, invariants, and script boundaries
 - [./residence_cells_pipeline.md](./residence_cells_pipeline.md) — residence-cell generation pipeline: allowlist, Merkle root, proof shards, map tiles, R2/S3 distribution
 
@@ -19,5 +20,6 @@ Sonari の contract publish、AWS verifier runner、smoke test、residence-cell 
 - [./admin_setup.md](./admin_setup.md) — admin / genesis セットアップ。手動 contract publish、admin wallet の扱い、GitHub Variables と PCR 登録の順番
 - [./verifier_runner.md](./verifier_runner.md) — Sonari verifier runner AWS stack の runbook。deploy、PCR config、smoke acceptance、Floor Census、詰まりどころ
 - [./membership_runner.md](./membership_runner.md) — membership identity AWS runner の runbook。artifact build、deploy、World ID verification、VerifierRegistry registration、Sui submit
+- [./enoki_membership_smoke.md](./enoki_membership_smoke.md) — Enoki / Google zkLogin / gasless MembershipPass の testnet smoke と secret rotation runbook
 - [./aws_smoke.md](./aws_smoke.md) — AWS smoke スクリプト。`pnpm aws:*` の verification / smoke コマンド、invariants、script boundaries
 - [./residence_cells_pipeline.md](./residence_cells_pipeline.md) — residence-cell 生成パイプライン。allowlist、Merkle root、proof shard、map tile、R2/S3 配布
