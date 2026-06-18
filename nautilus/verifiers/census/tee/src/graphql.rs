@@ -1,14 +1,19 @@
 use crate::CensusError;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use reqwest::Url;
 use serde_json::Value;
 use sonari_tee_core::TeeContext;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
 pub const CENSUS_GRAPHQL_NETWORK_KEY: &str = "SONARI_CENSUS_SUI_NETWORK";
 pub const CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY: &str = "SONARI_CENSUS_GRAPHQL_EGRESS_PROXY_URL";
 
 const GRAPHQL_REQUEST_TIMEOUT_MS: u64 = 10_000;
+const DEFAULT_CELL_COUNT_BATCH_SIZE: usize = 100;
+const DEFAULT_SHARD_CONCURRENCY_LIMIT: usize = 8;
+const DEFAULT_GRAPHQL_MAX_ATTEMPTS: u32 = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SuiGraphqlNetwork {
@@ -59,6 +64,58 @@ pub struct CellCountIndexResolution {
     pub census_checkpoint: u64,
     pub index: CellCountIndexMetadata,
     pub shard_object_ids: HashMap<u64, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CountedCellSnapshot {
+    pub h3_cell: u64,
+    pub cell_band: u8,
+    pub shard_id: u64,
+    pub active_count: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DynamicFieldName {
+    pub type_: String,
+    pub bcs: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ShardCountReadConfig {
+    pub batch_size: usize,
+    pub shard_concurrency_limit: usize,
+    pub max_attempts: u32,
+}
+
+impl Default for ShardCountReadConfig {
+    fn default() -> Self {
+        Self {
+            batch_size: DEFAULT_CELL_COUNT_BATCH_SIZE,
+            shard_concurrency_limit: DEFAULT_SHARD_CONCURRENCY_LIMIT,
+            max_attempts: DEFAULT_GRAPHQL_MAX_ATTEMPTS,
+        }
+    }
+}
+
+impl ShardCountReadConfig {
+    pub fn validate(&self) -> Result<(), CensusError> {
+        if self.batch_size == 0 {
+            return Err(CensusError::InvalidPayload(
+                "cell count batch_size must be greater than zero".to_owned(),
+            ));
+        }
+        if self.shard_concurrency_limit == 0 {
+            return Err(CensusError::InvalidPayload(
+                "shard_concurrency_limit must be greater than zero".to_owned(),
+            ));
+        }
+        if self.max_attempts == 0 {
+            return Err(CensusError::InvalidPayload(
+                "GraphQL max_attempts must be greater than zero".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl CensusGraphqlClient {
@@ -202,6 +259,116 @@ pub fn parse_cell_count_shard_object_ids(
     Ok(shards)
 }
 
+pub fn group_affected_cells_by_shard(
+    affected_cells: &[crate::AffectedCell],
+) -> Result<BTreeMap<u64, Vec<(u64, u8)>>, CensusError> {
+    let mut grouped: BTreeMap<u64, Vec<(u64, u8)>> = BTreeMap::new();
+    for cell in affected_cells {
+        let h3_cell = parse_canonical_u64(&cell.h3_index, "h3_index")?;
+        let cell_band = u8::try_from(cell.cell_band)
+            .map_err(|_| CensusError::InvalidPayload("cell_band must be in 1..=3".to_owned()))?;
+        if !(1..=3).contains(&cell_band) {
+            return Err(CensusError::InvalidPayload(
+                "cell_band must be in 1..=3".to_owned(),
+            ));
+        }
+        grouped
+            .entry(h3_cell % crate::SHARD_COUNT)
+            .or_default()
+            .push((h3_cell, cell_band));
+    }
+    Ok(grouped)
+}
+
+pub fn h3_cell_dynamic_field_key(h3_cell: u64) -> DynamicFieldName {
+    DynamicFieldName {
+        type_: "u64".to_owned(),
+        bcs: BASE64_STANDARD.encode(h3_cell.to_le_bytes()),
+    }
+}
+
+pub fn shard_count_batches(
+    cells: &[(u64, u8)],
+    config: &ShardCountReadConfig,
+) -> Result<Vec<Vec<(u64, u8)>>, CensusError> {
+    config.validate()?;
+    Ok(cells
+        .chunks(config.batch_size)
+        .map(|chunk| chunk.to_vec())
+        .collect())
+}
+
+pub fn shard_count_query_variables(
+    shard_object_id: &str,
+    census_checkpoint: u64,
+    cells: &[(u64, u8)],
+) -> Result<Value, CensusError> {
+    validate_object_id(shard_object_id, "shard_object_id")?;
+    Ok(serde_json::json!({
+        "shardObjectId": normalize_object_id(shard_object_id),
+        "checkpoint": census_checkpoint,
+        "keys": cells
+            .iter()
+            .map(|(h3_cell, _)| {
+                let key = h3_cell_dynamic_field_key(*h3_cell);
+                serde_json::json!({
+                    "type": key.type_,
+                    "bcs": key.bcs,
+                })
+            })
+            .collect::<Vec<_>>(),
+    }))
+}
+
+pub fn parse_shard_count_response(
+    response: &Value,
+    expected_cells: &[(u64, u8)],
+) -> Result<Vec<CountedCellSnapshot>, CensusError> {
+    let fields = read_array_path(
+        response,
+        &["data", "object", "multiGetDynamicFields"],
+        "GraphQL cell count dynamic fields",
+    )?;
+    if fields.len() != expected_cells.len() {
+        return Err(CensusError::InvalidPayload(
+            "GraphQL cell count dynamic fields response length mismatch".to_owned(),
+        ));
+    }
+    let mut counted = Vec::with_capacity(expected_cells.len());
+    for ((h3_cell, cell_band), field) in expected_cells.iter().zip(fields) {
+        let active_count = if field.is_null() {
+            0
+        } else {
+            parse_cell_count_active_count(field)?
+        };
+        counted.push(CountedCellSnapshot {
+            h3_cell: *h3_cell,
+            cell_band: *cell_band,
+            shard_id: *h3_cell % crate::SHARD_COUNT,
+            active_count,
+        });
+    }
+    Ok(counted)
+}
+
+fn parse_cell_count_active_count(field: &Value) -> Result<u64, CensusError> {
+    let json = read_path(
+        field,
+        &["contents", "json"],
+        "GraphQL cell count contents.json",
+    )?;
+    if let Some(active_count) = json.get("active_count") {
+        return read_u64_value(active_count, "active_count");
+    }
+    let value = json
+        .get("value")
+        .ok_or_else(|| CensusError::InvalidPayload("active_count is missing".to_owned()))?;
+    let active_count = value
+        .get("active_count")
+        .ok_or_else(|| CensusError::InvalidPayload("active_count is missing".to_owned()))?;
+    read_u64_value(active_count, "active_count")
+}
+
 fn graphql_event_json_nodes(response: &Value) -> Result<Vec<&Value>, CensusError> {
     let nodes = read_array_path(
         response,
@@ -328,9 +495,12 @@ fn same_object_id(left: &str, right: &str) -> bool {
 mod tests {
     use super::{
         CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, CENSUS_GRAPHQL_NETWORK_KEY, CensusGraphqlClient,
-        SuiGraphqlNetwork, parse_cell_count_index_metadata, parse_cell_count_shard_object_ids,
-        parse_latest_checkpoint_at_or_before,
+        ShardCountReadConfig, SuiGraphqlNetwork, group_affected_cells_by_shard,
+        h3_cell_dynamic_field_key, parse_cell_count_index_metadata,
+        parse_cell_count_shard_object_ids, parse_latest_checkpoint_at_or_before,
+        parse_shard_count_response, shard_count_batches, shard_count_query_variables,
     };
+    use crate::AffectedCell;
     use sonari_tee_core::TeeContext;
     use std::collections::HashSet;
 
@@ -600,7 +770,126 @@ mod tests {
         assert!(error.to_string().contains("duplicate"));
     }
 
+    #[test]
+    fn affected_cells_group_by_h3_mod_shard_count() {
+        let grouped = group_affected_cells_by_shard(&[
+            affected_cell("4096", 1),
+            affected_cell("4097", 2),
+            affected_cell("8192", 3),
+        ])
+        .unwrap();
+
+        assert_eq!(grouped.get(&0), Some(&vec![(4096, 1), (8192, 3)]));
+        assert_eq!(grouped.get(&1), Some(&vec![(4097, 2)]));
+    }
+
+    #[test]
+    fn h3_cell_dynamic_field_key_is_u64_bcs_base64() {
+        let key = h3_cell_dynamic_field_key(0x0102_0304_0506_0708);
+
+        assert_eq!(key.type_, "u64");
+        assert_eq!(key.bcs, "CAcGBQQDAgE=");
+    }
+
+    #[test]
+    fn shard_count_batches_respect_configured_batch_size() {
+        let config = ShardCountReadConfig {
+            batch_size: 2,
+            shard_concurrency_limit: 3,
+            max_attempts: 4,
+        };
+
+        let batches = shard_count_batches(&[(10, 1), (20, 2), (30, 3)], &config).unwrap();
+
+        assert_eq!(batches, vec![vec![(10, 1), (20, 2)], vec![(30, 3)]]);
+
+        let error = shard_count_batches(
+            &[(10, 1)],
+            &ShardCountReadConfig {
+                batch_size: 0,
+                shard_concurrency_limit: 1,
+                max_attempts: 1,
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("batch_size"));
+    }
+
+    #[test]
+    fn shard_count_query_variables_include_at_checkpoint_and_u64_keys() {
+        let shard_object_id = object_id("44");
+        let variables =
+            shard_count_query_variables(&shard_object_id, 41, &[(10, 1), (20, 2)]).unwrap();
+
+        assert_eq!(variables["shardObjectId"], shard_object_id);
+        assert_eq!(variables["checkpoint"], 41);
+        assert_eq!(variables["keys"][0]["type"], "u64");
+        assert_eq!(variables["keys"][0]["bcs"], "CgAAAAAAAAA=");
+        assert_eq!(variables["keys"][1]["type"], "u64");
+        assert_eq!(variables["keys"][1]["bcs"], "FAAAAAAAAAA=");
+    }
+
+    #[test]
+    fn shard_count_parser_reads_non_zero_counts_and_missing_fields_as_zero() {
+        let response = serde_json::json!({
+            "data": {
+                "object": {
+                    "multiGetDynamicFields": [
+                        { "contents": { "json": { "active_count": "12" } } },
+                        null,
+                        { "contents": { "json": { "value": { "active_count": 34 } } } }
+                    ]
+                }
+            }
+        });
+
+        let counted = parse_shard_count_response(&response, &[(10, 1), (20, 2), (30, 3)]).unwrap();
+
+        assert_eq!(counted[0].active_count, 12);
+        assert_eq!(counted[1].active_count, 0);
+        assert_eq!(counted[2].active_count, 34);
+        assert_eq!(counted[0].shard_id, 10);
+    }
+
+    #[test]
+    fn shard_count_parser_fails_closed_on_malformed_response() {
+        let response = serde_json::json!({
+            "data": {
+                "object": {
+                    "multiGetDynamicFields": [
+                        { "contents": { "json": { "active_count": "not-a-number" } } }
+                    ]
+                }
+            }
+        });
+
+        assert!(
+            parse_shard_count_response(&response, &[(10, 1)])
+                .unwrap_err()
+                .to_string()
+                .contains("active_count")
+        );
+
+        let response = serde_json::json!({
+            "data": { "object": { "multiGetDynamicFields": [] } }
+        });
+        assert!(
+            parse_shard_count_response(&response, &[(10, 1)])
+                .unwrap_err()
+                .to_string()
+                .contains("length")
+        );
+    }
+
     fn object_id(byte: &str) -> String {
         format!("0x{}", byte.repeat(32))
+    }
+
+    fn affected_cell(h3_index: &str, cell_band: u64) -> AffectedCell {
+        AffectedCell {
+            h3_index: h3_index.to_owned(),
+            intensity_value: 600,
+            cell_band,
+        }
     }
 }
