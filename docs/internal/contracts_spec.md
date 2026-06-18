@@ -412,6 +412,8 @@ public fun set_floor_census(
     pause_state: &PauseState,
     campaign: &mut Campaign,
     disaster_event: &DisasterEvent,
+    membership_registry: &MembershipRegistry,
+    count_index: &CellCountIndex,
     verifier_registry: &VerifierRegistry,
     category_pool: &mut CategoryPool,
     main_pool: &mut MainPool,
@@ -427,8 +429,10 @@ public fun set_floor_census(
   - version / pause / `campaign.paused == false`、`census_set == false`（**1度だけ**。`EFloorCensusAlreadySet`）。
   - `now < campaign.donation_end_ms`（Day 30 より前。床払いを開くため）。
   - `metadata_verifier::assert_enclave_signed_bytes`（**census family**）で署名・PCR・instance 有効性を検証。
+  - `CellCountIndex.membership_registry_id` が `membership_registry` の ID と一致すること。
   - `census_result::decode_verified` で BCS decode。`(event_uid, event_revision, affected_cells_root)` が
-    `disaster_event` のそれと一致すること（`EFloorCensusBindingMismatch`）。
+    `disaster_event` のそれと一致し、payload 内の `membership_registry_id` / `cell_count_index_id` が
+    渡された shared object の ID と一致すること（`EFloorCensusBindingMismatch`）。
   - `object::id(category_pool) == campaign.category_pool_id`、Main は genesis の Main Pool であること。
 - 処理（このとき1度だけ計算して固定する）:
 
@@ -459,9 +463,11 @@ floor_amount_by_band[b] = band_target[b] × floor_ratio_bps / 10_000            
     `floor_from_category_usdc` / `floor_from_main_usdc` に記録。
     各 Pool の `total_floor_funded_usdc` を加算。
   - `census_set = true`、`floor_amount_by_band` と escrow 元金額を保存。
-    `registered_members_by_band`、`max_liability_usdc`、`floor_ratio_bps` はイベントで残す。
+    `registered_members_by_band`、`max_liability_usdc`、`floor_ratio_bps`、
+    `census_checkpoint`、`counted_cells_root` はイベントで残す。
 - イベント: `FloorCensusSet { campaign_id, registered_members_by_band, max_liability_usdc,
-  floor_ratio_bps, floor_amount_by_band, draw_category_usdc, draw_main_usdc }`。
+  floor_ratio_bps, floor_amount_by_band, draw_category_usdc, draw_main_usdc,
+  census_checkpoint, counted_cells_root }`。
 - 実行者: permissionless（誰でも可。署名検証が gate）。off-chain の census worker / relayer が submit する。
 
 > **設計意図**: 拠出上限を「可処分 ÷ N」「可処分 × 20%」とすることで Pool は構造上空にならず、
@@ -916,7 +922,7 @@ assert!(obj.version == VERSION, EVersionMismatch);
 | イベント | 発行タイミング | 主なフィールド |
 | --- | --- | --- |
 | `CampaignCreated` | Campaign 自動作成 | disaster_event_id、event_uid/revision、category、category_pool_id、スナップショット全パラメータ、締切 |
-| `FloorCensusSet` | set_floor_census | registered_members_by_band、max_liability、floor_ratio_bps、floor_amount_by_band、draw_category、draw_main |
+| `FloorCensusSet` | set_floor_census | registered_members_by_band、max_liability、floor_ratio_bps、floor_amount_by_band、draw_category、draw_main、census_checkpoint、counted_cells_root |
 | `FloorPaid` | claim（床払い経路） | pass_lineage_id、band、amount、recipient |
 | `FloorBudgetReturned` | return_floor_budget | returned_to_category、returned_to_main |
 | `CategoryPoolCreated` | Category Pool 新設（admin） | pool_id、category、actor |

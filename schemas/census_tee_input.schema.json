@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sonari.example/schemas/census_tee_input.schema.json",
   "title": "Sonari Census TEE Input",
-  "$comment": "MVP input for the census TEE. BCS output field order is defined separately in schemas/census_result.bcs.md.",
+  "$comment": "MVP input for the census TEE. BCS output field order and counted_cells_root leaf hashing are defined separately in schemas/census_result.bcs.md. The TEE recomputes counted_cells_root from the provided snapshot and rejects mismatches.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,7 +13,10 @@
     "issued_at_ms",
     "campaign_id",
     "disaster_event_id",
+    "membership_registry_id",
+    "cell_count_index_id",
     "census_checkpoint",
+    "counted_cells_root",
     "affected_cells",
     "home_cell_events",
     "active_lineages"
@@ -47,9 +50,21 @@
       "type": "string",
       "pattern": "^0x[0-9a-f]{64}$"
     },
+    "membership_registry_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "cell_count_index_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
     "census_checkpoint": {
       "type": "integer",
       "minimum": 0
+    },
+    "counted_cells_root": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
     },
     "affected_cells": {
       "type": "object"

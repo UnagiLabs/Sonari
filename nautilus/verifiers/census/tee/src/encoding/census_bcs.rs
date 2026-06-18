@@ -1,5 +1,6 @@
 use crate::{
-    BAND_COUNT, CensusError, FloorCensusResult, INTENT, VERIFIER_FAMILY, VERIFIER_VERSION,
+    BAND_COUNT, CensusError, FloorCensusResult, H3_RESOLUTION, INTENT, SHARD_COUNT,
+    VERIFIER_FAMILY, VERIFIER_VERSION,
 };
 use serde::Serialize;
 use sonari_tee_core::hex_to_32;
@@ -12,12 +13,19 @@ struct FloorCensusResultBcs {
     event_uid: [u8; 32],
     event_revision: u32,
     affected_cells_root: [u8; 32],
+    membership_registry_id: [u8; 32],
+    cell_count_index_id: [u8; 32],
+    census_checkpoint: u64,
+    h3_resolution: u8,
+    shard_count: u64,
     registered_members_by_band: Vec<u64>,
+    counted_cells_root: [u8; 32],
     issued_at_ms: u64,
 }
 
 pub fn payload_bcs_bytes(result: &FloorCensusResult) -> Result<Vec<u8>, CensusError> {
     validate_contract_constants(result)?;
+    validate_census_constants(result)?;
     validate_band_count(result)?;
 
     bcs::to_bytes(&FloorCensusResultBcs {
@@ -27,7 +35,13 @@ pub fn payload_bcs_bytes(result: &FloorCensusResult) -> Result<Vec<u8>, CensusEr
         event_uid: hex_to_32(&result.event_uid)?,
         event_revision: result.event_revision,
         affected_cells_root: hex_to_32(&result.affected_cells_root)?,
+        membership_registry_id: hex_to_32(&result.membership_registry_id)?,
+        cell_count_index_id: hex_to_32(&result.cell_count_index_id)?,
+        census_checkpoint: result.census_checkpoint,
+        h3_resolution: result.h3_resolution,
+        shard_count: result.shard_count,
         registered_members_by_band: result.registered_members_by_band.clone(),
+        counted_cells_root: hex_to_32(&result.counted_cells_root)?,
         issued_at_ms: result.issued_at_ms,
     })
     .map_err(CensusError::from)
@@ -42,6 +56,16 @@ fn validate_contract_constants(result: &FloorCensusResult) -> Result<(), CensusE
     }
     if result.verifier_version != VERIFIER_VERSION {
         return invalid_payload("verifier_version must match the floor census contract");
+    }
+    Ok(())
+}
+
+fn validate_census_constants(result: &FloorCensusResult) -> Result<(), CensusError> {
+    if result.h3_resolution != H3_RESOLUTION {
+        return invalid_payload("h3_resolution must match the floor census contract");
+    }
+    if result.shard_count != SHARD_COUNT {
+        return invalid_payload("shard_count must match the floor census contract");
     }
     Ok(())
 }
@@ -72,7 +96,16 @@ mod tests {
             event_revision: 1,
             affected_cells_root:
                 "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+            membership_registry_id:
+                "0x2222222222222222222222222222222222222222222222222222222222222222".to_owned(),
+            cell_count_index_id:
+                "0x3333333333333333333333333333333333333333333333333333333333333333".to_owned(),
+            census_checkpoint: 41,
+            h3_resolution: crate::H3_RESOLUTION,
+            shard_count: crate::SHARD_COUNT,
             registered_members_by_band: vec![100, 200, 300],
+            counted_cells_root:
+                "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_owned(),
             issued_at_ms: 1_800_000_000_000,
         }
     }
@@ -83,7 +116,7 @@ mod tests {
 
         assert_eq!(
             sonari_tee_core::to_hex(&bytes),
-            "0x16534f4e4152495f464c4f4f525f43454e5355535f56310663656e7375730100000000000000111111111111111111111111111111111111111111111111111111111111111101000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa036400000000000000c8000000000000002c0100000000000000505c18a3010000",
+            "0x16534f4e4152495f464c4f4f525f43454e5355535f56310663656e7375730100000000000000111111111111111111111111111111111111111111111111111111111111111101000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa222222222222222222222222222222222222222222222222222222222222222233333333333333333333333333333333333333333333333333333333333333332900000000000000070010000000000000036400000000000000c8000000000000002c01000000000000cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc00505c18a3010000",
         );
     }
 
@@ -100,6 +133,14 @@ mod tests {
         let mut wrong_version = valid_result();
         wrong_version.verifier_version = 2;
         assert!(payload_bcs_bytes(&wrong_version).is_err());
+
+        let mut wrong_h3_resolution = valid_result();
+        wrong_h3_resolution.h3_resolution = 8;
+        assert!(payload_bcs_bytes(&wrong_h3_resolution).is_err());
+
+        let mut wrong_shard_count = valid_result();
+        wrong_shard_count.shard_count = 1;
+        assert!(payload_bcs_bytes(&wrong_shard_count).is_err());
     }
 
     #[test]
@@ -110,6 +151,18 @@ mod tests {
 
         let mut result = valid_result();
         result.affected_cells_root = "0xaa".to_owned();
+        assert!(payload_bcs_bytes(&result).is_err());
+
+        let mut result = valid_result();
+        result.membership_registry_id = "0x22".to_owned();
+        assert!(payload_bcs_bytes(&result).is_err());
+
+        let mut result = valid_result();
+        result.cell_count_index_id = "0x33".to_owned();
+        assert!(payload_bcs_bytes(&result).is_err());
+
+        let mut result = valid_result();
+        result.counted_cells_root = "0xcc".to_owned();
         assert!(payload_bcs_bytes(&result).is_err());
     }
 

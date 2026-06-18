@@ -2942,6 +2942,7 @@ export function readFloorCensusConfigFromEnv(
         ["FLOOR_CENSUS_CATEGORY_POOL", process.env.FLOOR_CENSUS_CATEGORY_POOL],
         ["FLOOR_CENSUS_MAIN_POOL", process.env.FLOOR_CENSUS_MAIN_POOL],
         ["SONARI_MEMBERSHIP_REGISTRY_ID", process.env.SONARI_MEMBERSHIP_REGISTRY_ID],
+        ["FLOOR_CENSUS_CELL_COUNT_INDEX", process.env.FLOOR_CENSUS_CELL_COUNT_INDEX],
         ["RELAYER_VERIFIER_REGISTRY", process.env.RELAYER_VERIFIER_REGISTRY],
         ["RELAYER_NETWORK", process.env.RELAYER_NETWORK],
         ["RELAYER_GRPC_URL", grpcUrl],
@@ -2972,6 +2973,7 @@ export function readFloorCensusConfigFromEnv(
         categoryPool: process.env.FLOOR_CENSUS_CATEGORY_POOL ?? "",
         mainPool: process.env.FLOOR_CENSUS_MAIN_POOL ?? "",
         membershipRegistry: process.env.SONARI_MEMBERSHIP_REGISTRY_ID ?? "",
+        cellCountIndex: process.env.FLOOR_CENSUS_CELL_COUNT_INDEX ?? "",
         reader: graphqlUrl === undefined ? undefined : new GraphqlFloorCensusReader(graphqlUrl),
     };
     if (network !== undefined) {

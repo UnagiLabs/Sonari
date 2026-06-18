@@ -1,7 +1,10 @@
 use census_tee::server::{
     CensusProcessHandler, finalize_process_output, parse_process_data_envelope,
 };
-use census_tee::{AffectedCell, AffectedCellsArtifact, compute_affected_cells_root};
+use census_tee::{
+    AffectedCell, AffectedCellsArtifact, CensusInputBundle, HomeCellRegisteredEvent,
+    compute_affected_cells_root, compute_floor_census_snapshot,
+};
 use sonari_tee_core::{
     EnclaveRegistrationMetadata, LocalEd25519Signer, ProcessDataHandler, ProcessOutput, TeeContext,
 };
@@ -29,6 +32,19 @@ fn server_handler_returns_non_empty_signable_output() {
     assert_eq!(
         result_json["payload"]["registered_members_by_band"],
         serde_json::json!([1, 1, 0])
+    );
+    assert_eq!(
+        result_json["payload"]["membership_registry_id"],
+        format!("0x{}", "22".repeat(32))
+    );
+    assert_eq!(
+        result_json["payload"]["cell_count_index_id"],
+        format!("0x{}", "33".repeat(32))
+    );
+    assert_eq!(result_json["payload"]["census_checkpoint"], 345);
+    assert_eq!(
+        result_json["payload"]["counted_cells_root"],
+        expected_counted_cells_root()
     );
     assert_eq!(result_json["signature"], "");
     assert_eq!(result_json["public_key"], "");
@@ -112,6 +128,40 @@ fn valid_bundle_json() -> serde_json::Value {
         ],
     };
     let affected_cells_root = compute_affected_cells_root(event_uid, 7, &affected_cells).unwrap();
+    let home_cell_events = vec![
+        HomeCellRegisteredEvent {
+            lineage: format!("0x{}", "11".repeat(32)),
+            home_cell: "10".to_owned(),
+            registered_at_ms: 900,
+        },
+        HomeCellRegisteredEvent {
+            lineage: format!("0x{}", "22".repeat(32)),
+            home_cell: "20".to_owned(),
+            registered_at_ms: 901,
+        },
+    ];
+    let active_lineages = vec![
+        format!("0x{}", "11".repeat(32)),
+        format!("0x{}", "22".repeat(32)),
+    ];
+    let counted_cells_root = compute_floor_census_snapshot(&CensusInputBundle {
+        event_uid: event_uid.to_owned(),
+        event_revision: 7,
+        occurred_at_ms: 1_000,
+        affected_cells_root: affected_cells_root.clone(),
+        issued_at_ms: 1_234,
+        campaign_id: format!("0x{}", "44".repeat(32)),
+        disaster_event_id: format!("0x{}", "55".repeat(32)),
+        membership_registry_id: format!("0x{}", "22".repeat(32)),
+        cell_count_index_id: format!("0x{}", "33".repeat(32)),
+        census_checkpoint: 345,
+        counted_cells_root: format!("0x{}", "cc".repeat(32)),
+        affected_cells: affected_cells.clone(),
+        home_cell_events: home_cell_events.clone(),
+        active_lineages: active_lineages.clone(),
+    })
+    .unwrap()
+    .counted_cells_root;
 
     serde_json::json!({
         "event_uid": event_uid,
@@ -121,23 +171,16 @@ fn valid_bundle_json() -> serde_json::Value {
         "issued_at_ms": 1_234,
         "campaign_id": format!("0x{}", "44".repeat(32)),
         "disaster_event_id": format!("0x{}", "55".repeat(32)),
+        "membership_registry_id": format!("0x{}", "22".repeat(32)),
+        "cell_count_index_id": format!("0x{}", "33".repeat(32)),
         "census_checkpoint": 345,
+        "counted_cells_root": counted_cells_root,
         "affected_cells": affected_cells,
-        "home_cell_events": [
-            {
-                "lineage": format!("0x{}", "11".repeat(32)),
-                "home_cell": "10",
-                "registered_at_ms": 900
-            },
-            {
-                "lineage": format!("0x{}", "22".repeat(32)),
-                "home_cell": "20",
-                "registered_at_ms": 901
-            }
-        ],
-        "active_lineages": [
-            format!("0x{}", "11".repeat(32)),
-            format!("0x{}", "22".repeat(32))
-        ]
+        "home_cell_events": home_cell_events,
+        "active_lineages": active_lineages
     })
+}
+
+fn expected_counted_cells_root() -> serde_json::Value {
+    valid_bundle_json()["counted_cells_root"].clone()
 }

@@ -47,20 +47,22 @@ fun init_creates_genesis_objects_and_tracking_events() {
         membership::registry_created_event_fields(*membership_events.borrow(0));
     assert!(membership_registry_kind == membership::registry_kind_membership());
 
-    let cell_count_index_events = event::events_by_type<cell_count_index::CellCountIndexCreated>();
+    let cell_count_index_events = event::events_by_type<cell_count_index::CellCountIndexPublished>();
     assert!(cell_count_index_events.length() == 1);
     let (
-        cell_count_index_id_from_event,
+        cell_count_package_id_from_event,
         cell_count_index_membership_registry_id_from_event,
+        cell_count_index_id_from_event,
         cell_count_index_h3_resolution_from_event,
         cell_count_index_shard_count_from_event,
         _,
-    ) = cell_count_index::cell_count_index_created_event_fields(*cell_count_index_events.borrow(0));
+    ) = cell_count_index::cell_count_index_published_event_fields(*cell_count_index_events.borrow(0));
+    assert!(cell_count_package_id_from_event == cell_count_index::package_id_for_testing());
     assert!(cell_count_index_membership_registry_id_from_event == membership_registry_id_from_event);
     assert!(cell_count_index_h3_resolution_from_event == 7u8);
     assert!(cell_count_index_shard_count_from_event == 4096u64);
 
-    let cell_count_shard_events = event::events_by_type<cell_count_index::CellCountShardCreated>();
+    let cell_count_shard_events = event::events_by_type<cell_count_index::CellCountShardPublished>();
     assert!(cell_count_shard_events.length() == 0);
 
     let verifier_events = event::events_by_type<metadata_verifier::RegistryCreated>();

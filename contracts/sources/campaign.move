@@ -160,6 +160,8 @@ public struct ClaimReceipt has key {
 
 public struct FloorCensusSet has copy, drop {
     campaign_id: ID,
+    census_checkpoint: u64,
+    counted_cells_root: vector<u8>,
     registered_members_by_band: vector<u64>,
     max_liability_usdc: u64,
     floor_ratio_bps: u64,
@@ -484,6 +486,34 @@ public(package) fun apply_floor_census(
     now_ms: u64,
     ctx: &mut TxContext,
 ) {
+    apply_floor_census_with_index(
+        campaign,
+        result,
+        disaster_event_uid,
+        disaster_event_revision,
+        disaster_event_affected_cells_root,
+        census_result::membership_registry_id(result),
+        census_result::cell_count_index_id(result),
+        category_pool,
+        main_pool,
+        now_ms,
+        ctx,
+    );
+}
+
+public(package) fun apply_floor_census_with_index(
+    campaign: &mut Campaign,
+    result: &FloorCensusResult,
+    disaster_event_uid: vector<u8>,
+    disaster_event_revision: u32,
+    disaster_event_affected_cells_root: vector<u8>,
+    membership_registry_id: ID,
+    cell_count_index_id: ID,
+    category_pool: &mut CategoryPool,
+    main_pool: &mut MainPool,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
     assert!(!campaign.census_set, EFloorCensusAlreadySet);
     assert!(now_ms < campaign.donation_end_ms, EFloorCensusAfterDonationEnd);
     assert!(
@@ -502,8 +532,18 @@ public(package) fun apply_floor_census(
         census_result::affected_cells_root(result) == disaster_event_affected_cells_root,
         EFloorCensusBindingMismatch,
     );
+    assert!(
+        census_result::membership_registry_id(result) == membership_registry_id,
+        EFloorCensusBindingMismatch,
+    );
+    assert!(
+        census_result::cell_count_index_id(result) == cell_count_index_id,
+        EFloorCensusBindingMismatch,
+    );
 
     let registered = census_result::registered_members_by_band(result);
+    let census_checkpoint = census_result::census_checkpoint(result);
+    let counted_cells_root = census_result::counted_cells_root(result);
     let band_targets = campaign.terms.band_target_usdc;
 
     let mut max_liability: u128 = 0;
@@ -520,6 +560,8 @@ public(package) fun apply_floor_census(
         campaign.census_set = true;
         event::emit(FloorCensusSet {
             campaign_id,
+            census_checkpoint,
+            counted_cells_root,
             registered_members_by_band: registered,
             max_liability_usdc: 0,
             floor_ratio_bps: 0,
@@ -566,6 +608,8 @@ public(package) fun apply_floor_census(
 
     event::emit(FloorCensusSet {
         campaign_id,
+        census_checkpoint,
+        counted_cells_root,
         registered_members_by_band: registered,
         max_liability_usdc: max_liability as u64,
         floor_ratio_bps,
@@ -1228,6 +1272,8 @@ public fun floor_census_set_event_fields(
 ): (ID, vector<u64>, u64, u64, vector<u64>, u64, u64) {
     let FloorCensusSet {
         campaign_id,
+        census_checkpoint: _,
+        counted_cells_root: _,
         registered_members_by_band,
         max_liability_usdc,
         floor_ratio_bps,
@@ -1244,6 +1290,22 @@ public fun floor_census_set_event_fields(
         draw_category_usdc,
         draw_main_usdc,
     )
+}
+
+#[test_only]
+public fun floor_census_set_metadata_event_fields(event: FloorCensusSet): (ID, u64, vector<u8>) {
+    let FloorCensusSet {
+        campaign_id,
+        census_checkpoint,
+        counted_cells_root,
+        registered_members_by_band: _,
+        max_liability_usdc: _,
+        floor_ratio_bps: _,
+        floor_amount_by_band: _,
+        draw_category_usdc: _,
+        draw_main_usdc: _,
+    } = event;
+    (campaign_id, census_checkpoint, counted_cells_root)
 }
 
 #[test_only]

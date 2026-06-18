@@ -26,6 +26,7 @@ const DONATION_END_MS: u64 = 1_704_170_000_000 + 2_592_000_000_000;
 const EVENT_UID: vector<u8> = x"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const EVENT_REVISION: u32 = 1u32;
 const CELLS_ROOT: vector<u8> = x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const COUNTED_CELLS_ROOT: vector<u8> = x"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
 const KYC_DUPLICATE_KEY: vector<u8> = x"4444444444444444444444444444444444444444444444444444444444444444";
 
@@ -112,6 +113,24 @@ fun make_census_result(
     )
 }
 
+fun make_census_result_with_ids(
+    registered_by_band: vector<u64>,
+    membership_registry_id: ID,
+    cell_count_index_id: ID,
+): census_result::FloorCensusResult {
+    census_result::new_for_testing_with_context(
+        EVENT_UID,
+        EVENT_REVISION,
+        CELLS_ROOT,
+        membership_registry_id,
+        cell_count_index_id,
+        41,
+        registered_by_band,
+        COUNTED_CELLS_ROOT,
+        NOW_MS,
+    )
+}
+
 fun setup_verified_member(
     scenario: &mut test_scenario::Scenario,
 ): (identity_registry::IdentityRegistry, membership::MembershipRegistry, membership::MembershipPass) {
@@ -189,6 +208,10 @@ fun floor_census_with_zero_members_sets_census_no_escrow() {
     assert!(max_liability == 0);
     assert!(floor_ratio == 0);
     assert!(*event_floor_amounts.borrow(0) == 0);
+    let (_, census_checkpoint, counted_cells_root) =
+        campaign::floor_census_set_metadata_event_fields(*emitted.borrow(0));
+    assert!(census_checkpoint == 41);
+    assert!(counted_cells_root == COUNTED_CELLS_ROOT);
 
     test_scenario::return_shared(cat_pool);
     test_scenario::return_shared(main_pool);
@@ -263,6 +286,10 @@ fun floor_census_normal_calculates_correct_ratio_and_escrows() {
     assert!(*event_floor_amounts.borrow(2) == 150_000_000);
     assert!(event_draw_cat == 2_000_000_000);
     assert!(event_draw_main == 4_250_000_000);
+    let (_, census_checkpoint, counted_cells_root) =
+        campaign::floor_census_set_metadata_event_fields(*emitted.borrow(0));
+    assert!(census_checkpoint == 41);
+    assert!(counted_cells_root == COUNTED_CELLS_ROOT);
 
     test_scenario::return_shared(cat_pool);
     test_scenario::return_shared(main_pool);
@@ -299,6 +326,84 @@ fun floor_census_binding_mismatch_rejects_wrong_event_uid() {
         EVENT_UID,
         EVENT_REVISION,
         CELLS_ROOT,
+        &mut cat_pool,
+        &mut main_pool,
+        NOW_MS,
+        scenario.ctx(),
+    );
+
+    test_scenario::return_shared(cat_pool);
+    test_scenario::return_shared(main_pool);
+    test_scenario::return_shared(c);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = campaign::EFloorCensusBindingMismatch)]
+fun floor_census_binding_mismatch_rejects_wrong_membership_registry() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario, EVENT_UID);
+
+    scenario.next_tx(ADMIN);
+    let mut cat_pool = scenario.take_shared<category_pool::CategoryPool>();
+    let mut main_pool = scenario.take_shared<pools::MainPool>();
+    let mut c = scenario.take_shared<campaign::Campaign>();
+
+    let expected_membership_registry =
+        object::id_from_address(@0x2222222222222222222222222222222222222222222222222222222222222222);
+    let cell_count_index =
+        object::id_from_address(@0x3333333333333333333333333333333333333333333333333333333333333333);
+    let result = make_census_result_with_ids(
+        vector[10, 0, 0],
+        object::id_from_address(@0x9999999999999999999999999999999999999999999999999999999999999999),
+        cell_count_index,
+    );
+    campaign::apply_floor_census_with_index(
+        &mut c,
+        &result,
+        EVENT_UID,
+        EVENT_REVISION,
+        CELLS_ROOT,
+        expected_membership_registry,
+        cell_count_index,
+        &mut cat_pool,
+        &mut main_pool,
+        NOW_MS,
+        scenario.ctx(),
+    );
+
+    test_scenario::return_shared(cat_pool);
+    test_scenario::return_shared(main_pool);
+    test_scenario::return_shared(c);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = campaign::EFloorCensusBindingMismatch)]
+fun floor_census_binding_mismatch_rejects_wrong_cell_count_index() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario, EVENT_UID);
+
+    scenario.next_tx(ADMIN);
+    let mut cat_pool = scenario.take_shared<category_pool::CategoryPool>();
+    let mut main_pool = scenario.take_shared<pools::MainPool>();
+    let mut c = scenario.take_shared<campaign::Campaign>();
+
+    let membership_registry =
+        object::id_from_address(@0x2222222222222222222222222222222222222222222222222222222222222222);
+    let expected_cell_count_index =
+        object::id_from_address(@0x3333333333333333333333333333333333333333333333333333333333333333);
+    let result = make_census_result_with_ids(
+        vector[10, 0, 0],
+        membership_registry,
+        object::id_from_address(@0x9999999999999999999999999999999999999999999999999999999999999999),
+    );
+    campaign::apply_floor_census_with_index(
+        &mut c,
+        &result,
+        EVENT_UID,
+        EVENT_REVISION,
+        CELLS_ROOT,
+        membership_registry,
+        expected_cell_count_index,
         &mut cat_pool,
         &mut main_pool,
         NOW_MS,

@@ -508,6 +508,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         expect(workflow).toContain("SonariVerifierRegistryId=$SONARI_VERIFIER_REGISTRY_ID");
         expect(workflow).toContain("RelayerCategoryRegistry=$RELAYER_CATEGORY_REGISTRY");
         expect(workflow).toContain("RelayerCategoryPool=$RELAYER_CATEGORY_POOL");
+        expect(workflow).toContain("FloorCensusCellCountIndex=$FLOOR_CENSUS_CELL_COUNT_INDEX");
     });
 
     it("derives Sonari contract ids from Published.toml and Sui events instead of GitHub variables", async () => {
@@ -548,6 +549,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "FloorCensusPauseState=$FLOOR_CENSUS_PAUSE_STATE",
             "FloorCensusCategoryPool=$FLOOR_CENSUS_CATEGORY_POOL",
             "FloorCensusMainPool=$FLOOR_CENSUS_MAIN_POOL",
+            "FloorCensusCellCountIndex=$FLOOR_CENSUS_CELL_COUNT_INDEX",
             "FloorCensusGraphqlUrl=$FLOOR_CENSUS_GRAPHQL_URL",
         ]);
         expect(workflow).not.toContain("SONARI_FLOOR_CENSUS_JSON_RPC_URL");
@@ -564,6 +566,9 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         );
         expect(workflow).not.toContain(
             "FLOOR_CENSUS_MAIN_POOL: $" + "{{ vars.SONARI_FLOOR_CENSUS_MAIN_POOL }}",
+        );
+        expect(workflow).not.toContain(
+            "FLOOR_CENSUS_CELL_COUNT_INDEX: $" + "{{ vars.SONARI_FLOOR_CENSUS_CELL_COUNT_INDEX }}",
         );
 
         const requiredNamesMatch = workflow.match(/required_names=\(\n([\s\S]*?)\n {10}\)/u);

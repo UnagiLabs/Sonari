@@ -286,6 +286,8 @@ public fun set_floor_census(
     pause_state: &PauseState,
     campaign: &mut campaign_v2::Campaign,
     disaster_event: &DisasterEvent,
+    membership_registry: &membership::MembershipRegistry,
+    count_index: &cell_count_index::CellCountIndex,
     verifier_registry: &metadata_verifier::VerifierRegistry,
     category_pool: &mut CategoryPool,
     main_pool: &mut MainPool,
@@ -301,6 +303,10 @@ public fun set_floor_census(
         object::id(disaster_event) == campaign_v2::campaign_disaster_event_id(campaign),
         EDisasterEventMismatch,
     );
+    cell_count_index::assert_membership_registry_id(
+        count_index,
+        membership::registry_id(membership_registry),
+    );
 
     let now_ms = clock::timestamp_ms(clock);
     let (_, _, _) = metadata_verifier::assert_enclave_signed_bytes(
@@ -313,12 +319,14 @@ public fun set_floor_census(
         now_ms,
     );
     let result = census_result::decode_verified(census_bcs, now_ms);
-    campaign_v2::apply_floor_census(
+    campaign_v2::apply_floor_census_with_index(
         campaign,
         &result,
         disaster_event::event_uid(disaster_event),
         disaster_event::event_revision(disaster_event),
         disaster_event::affected_cells_root(disaster_event),
+        membership::registry_id(membership_registry),
+        cell_count_index::index_id(count_index),
         category_pool,
         main_pool,
         now_ms,

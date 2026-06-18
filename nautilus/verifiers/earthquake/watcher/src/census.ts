@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Transaction } from "@mysten/sui/transactions";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 import type { RelayerSigner, SuiNetwork } from "@sonari/earthquake-relayer";
@@ -16,6 +17,8 @@ import {
 const CENSUS_INTENT = "SONARI_FLOOR_CENSUS_V1";
 const CENSUS_VERIFIER_FAMILY = "census";
 const CENSUS_VERIFIER_VERSION = 1n;
+const CENSUS_H3_RESOLUTION = 7;
+const CENSUS_SHARD_COUNT = 4_096n;
 const BAND_COUNT = 3;
 const ED25519_SIGNATURE_BYTES = 64;
 const ED25519_PUBLIC_KEY_BYTES = 32;
@@ -123,11 +126,20 @@ export interface FloorCensusCountsInput {
     eventRevision: number;
 }
 
+export interface FloorCensusSnapshot {
+    counts: [bigint, bigint, bigint];
+    countedCellsRoot: string;
+}
+
 export interface FloorCensusResultFields {
     eventUid: string;
     eventRevision: number;
     affectedCellsRoot: string;
+    membershipRegistryId: string;
+    cellCountIndexId: string;
+    censusCheckpoint: number;
     registeredMembersByBand: readonly [bigint, bigint, bigint];
+    countedCellsRoot: string;
     issuedAtMs: number;
 }
 
@@ -148,7 +160,10 @@ export interface FloorCensusInputBundle {
     issued_at_ms: number;
     campaign_id: string;
     disaster_event_id: string;
+    membership_registry_id: string;
+    cell_count_index_id: string;
     census_checkpoint: number;
+    counted_cells_root: string;
     affected_cells: AffectedCellsArtifact;
     home_cell_events: Array<{
         lineage: string;
@@ -244,6 +259,7 @@ export interface FloorCensusSubmitConfig {
     categoryPool: string;
     mainPool: string;
     membershipRegistry: string;
+    cellCountIndex: string;
     network?: SuiNetwork | undefined;
     grpcUrl?: string | undefined;
     signer?: RelayerSigner | undefined;
@@ -259,6 +275,10 @@ export interface FloorCensusTeeClient {
 }
 
 export function computeFloorCensusCounts(input: FloorCensusCountsInput): [bigint, bigint, bigint] {
+    return computeFloorCensusSnapshot(input).counts;
+}
+
+export function computeFloorCensusSnapshot(input: FloorCensusCountsInput): FloorCensusSnapshot {
     validateCensusBinding(input);
     const actualRoot = computeAffectedCellsRootHex(input.affectedCells);
     if (
@@ -268,7 +288,7 @@ export function computeFloorCensusCounts(input: FloorCensusCountsInput): [bigint
         throw new Error("affected_cells artifact leaves do not match signed Merkle root");
     }
 
-    const cellsByH3 = new Map<string, number>();
+    const cellsByH3 = new Map<string, { h3: bigint; band: number }>();
     for (const cell of input.affectedCells.affected_cells) {
         if (
             !Number.isSafeInteger(cell.cell_band) ||
@@ -277,7 +297,8 @@ export function computeFloorCensusCounts(input: FloorCensusCountsInput): [bigint
         ) {
             throw new Error(`affected cell band must be in range 1..${BAND_COUNT}`);
         }
-        cellsByH3.set(canonicalU64Decimal(cell.h3_index), cell.cell_band);
+        const h3 = BigInt(canonicalU64Decimal(cell.h3_index));
+        cellsByH3.set(h3.toString(10), { h3, band: cell.cell_band });
     }
 
     const latestBeforeCutoff = new Map<string, HomeCellRegisteredEvent>();
@@ -297,22 +318,36 @@ export function computeFloorCensusCounts(input: FloorCensusCountsInput): [bigint
     }
 
     const counts: [bigint, bigint, bigint] = [0n, 0n, 0n];
+    const countsByH3 = new Map<string, bigint>(
+        [...cellsByH3.keys()].map((h3) => [h3, 0n] as const),
+    );
     for (const [lineage, event] of latestBeforeCutoff) {
         if (!input.activeLineages.has(lineage)) {
             continue;
         }
-        const band = cellsByH3.get(canonicalU64Decimal(event.homeCell));
-        if (band === undefined) {
+        const h3 = canonicalU64Decimal(event.homeCell);
+        const cell = cellsByH3.get(h3);
+        if (cell === undefined) {
             continue;
         }
-        const index = band - 1;
+        const index = cell.band - 1;
         const current = counts[index];
         if (current === undefined) {
             throw new Error(`affected cell band must be in range 1..${BAND_COUNT}`);
         }
         counts[index] = current + 1n;
+        countsByH3.set(h3, (countsByH3.get(h3) ?? 0n) + 1n);
     }
-    return counts;
+    return {
+        counts,
+        countedCellsRoot: countedCellsRoot(
+            [...cellsByH3.values()].map((cell) => ({
+                h3: cell.h3,
+                band: cell.band,
+                count: countsByH3.get(cell.h3.toString(10)) ?? 0n,
+            })),
+        ),
+    };
 }
 
 export function encodeFloorCensusResultBcs(input: FloorCensusResultFields): Uint8Array {
@@ -326,7 +361,13 @@ export function encodeFloorCensusResultBcs(input: FloorCensusResultFields): Uint
         hexBytes32(input.eventUid),
         u32(input.eventRevision),
         hexBytes32(input.affectedCellsRoot),
+        hexBytes32(input.membershipRegistryId),
+        hexBytes32(input.cellCountIndexId),
+        u64(BigInt(input.censusCheckpoint)),
+        Uint8Array.of(CENSUS_H3_RESOLUTION),
+        u64(CENSUS_SHARD_COUNT),
         u64Vector(input.registeredMembersByBand),
+        hexBytes32(input.countedCellsRoot),
         u64(BigInt(input.issuedAtMs)),
     ]);
 }
@@ -360,6 +401,8 @@ export async function buildFloorCensusInputBundle(input: {
     activeLineages: ReadonlySet<string> | readonly string[];
     campaignId: string;
     disasterEventId: string;
+    membershipRegistryId: string;
+    cellCountIndexId: string;
     censusCheckpoint: number;
     issuedAtMs: number;
     affectedCellsResolver?: FloorCensusAffectedCellsResolver | undefined;
@@ -370,13 +413,15 @@ export async function buildFloorCensusInputBundle(input: {
     }
     validateObjectId(input.campaignId, "campaign_id");
     validateObjectId(input.disasterEventId, "disaster_event_id");
+    validateObjectId(input.membershipRegistryId, "membership_registry_id");
+    validateObjectId(input.cellCountIndexId, "cell_count_index_id");
     validateSafeInteger(input.censusCheckpoint, "census_checkpoint");
     validateSafeInteger(input.issuedAtMs, "issued_at_ms");
 
     const parsed = validation.value;
     const payload = parsed.payload as EarthquakeOraclePayload;
     const affectedCells = await resolveAffectedCellsForCensus(parsed, input.affectedCellsResolver);
-    validateCensusBinding({
+    const snapshot = computeFloorCensusSnapshot({
         affectedCells,
         homeCellEvents: input.homeCellEvents,
         activeLineages: new Set(activeLineageArray(input.activeLineages)),
@@ -394,7 +439,10 @@ export async function buildFloorCensusInputBundle(input: {
         issued_at_ms: input.issuedAtMs,
         campaign_id: input.campaignId,
         disaster_event_id: input.disasterEventId,
+        membership_registry_id: input.membershipRegistryId,
+        cell_count_index_id: input.cellCountIndexId,
         census_checkpoint: input.censusCheckpoint,
+        counted_cells_root: snapshot.countedCellsRoot,
         affected_cells: affectedCells,
         home_cell_events: input.homeCellEvents.map((event) => ({
             lineage: event.lineage,
@@ -431,6 +479,8 @@ export function createSetFloorCensusTransaction(input: {
     pauseState: string;
     campaignId: string;
     disasterEventId: string;
+    membershipRegistry: string;
+    cellCountIndex: string;
     verifierRegistry: string;
     categoryPool: string;
     mainPool: string;
@@ -446,6 +496,8 @@ export function createSetFloorCensusTransaction(input: {
             tx.object(input.pauseState),
             tx.object(input.campaignId),
             tx.object(input.disasterEventId),
+            tx.object(input.membershipRegistry),
+            tx.object(input.cellCountIndex),
             tx.object(input.verifierRegistry),
             tx.object(input.categoryPool),
             tx.object(input.mainPool),
@@ -509,7 +561,7 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
             lineages: unique(homeCellEvents.map((event) => event.lineage)),
             checkpoint: campaign.checkpoint,
         });
-        const counts = computeFloorCensusCounts({
+        const snapshot = computeFloorCensusSnapshot({
             affectedCells,
             homeCellEvents,
             activeLineages,
@@ -522,7 +574,11 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
             eventUid: payload.event_uid,
             eventRevision: payload.event_revision,
             affectedCellsRoot: payload.affected_cells_root,
-            registeredMembersByBand: counts,
+            membershipRegistryId: this.config.membershipRegistry,
+            cellCountIndexId: this.config.cellCountIndex,
+            censusCheckpoint: campaign.checkpoint,
+            registeredMembersByBand: snapshot.counts,
+            countedCellsRoot: snapshot.countedCellsRoot,
             issuedAtMs: this.config.now?.() ?? Date.now(),
         });
         const response = await client.signAndExecuteTransaction({
@@ -532,6 +588,8 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
                 pauseState: this.config.pauseState,
                 campaignId: campaign.campaignId,
                 disasterEventId: input.disasterEventId,
+                membershipRegistry: this.config.membershipRegistry,
+                cellCountIndex: this.config.cellCountIndex,
                 verifierRegistry: this.config.verifierRegistry,
                 categoryPool: this.config.categoryPool,
                 mainPool: this.config.mainPool,
@@ -548,7 +606,7 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
             digest,
             campaignId: campaign.campaignId,
             disasterEventId: input.disasterEventId,
-            counts,
+            counts: snapshot.counts,
             censusBcsHex: signed.censusBcsHex,
             signatureHex: signed.signatureHex,
             publicKeyHex: signed.publicKeyHex,
@@ -616,6 +674,8 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
             activeLineages,
             campaignId: campaign.campaignId,
             disasterEventId: input.disasterEventId,
+            membershipRegistryId: this.config.membershipRegistry,
+            cellCountIndexId: this.config.cellCountIndex,
             censusCheckpoint: campaign.checkpoint,
             issuedAtMs: this.config.now?.() ?? Date.now(),
         });
@@ -639,6 +699,8 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
                 pauseState: this.config.pauseState,
                 campaignId: campaign.campaignId,
                 disasterEventId: input.disasterEventId,
+                membershipRegistry: this.config.membershipRegistry,
+                cellCountIndex: this.config.cellCountIndex,
                 verifierRegistry: this.config.verifierRegistry,
                 categoryPool: this.config.categoryPool,
                 mainPool: this.config.mainPool,
@@ -989,6 +1051,57 @@ function validateCensusBinding(input: FloorCensusCountsInput): void {
     if (input.affectedCells.event_revision !== input.eventRevision) {
         throw new Error("affected_cells event_revision does not match census event_revision");
     }
+}
+
+function countedCellsRoot(cells: readonly { h3: bigint; band: number; count: bigint }[]): string {
+    const leafHashes = [...cells]
+        .sort((left, right) => compareBigint(left.h3, right.h3))
+        .map((cell) =>
+            sha256(
+                concatBytes([
+                    Uint8Array.of(0),
+                    u64(cell.h3),
+                    Uint8Array.of(cell.band),
+                    u64(cell.h3 % CENSUS_SHARD_COUNT),
+                    u64(cell.count),
+                ]),
+            ),
+        );
+    const root = merkleRootFromLeafHashes(leafHashes);
+    if (root === undefined) {
+        throw new Error("counted_cells_root requires at least one affected cell");
+    }
+    return bytesToHex(root);
+}
+
+function merkleRootFromLeafHashes(leafHashes: readonly Uint8Array[]): Uint8Array | undefined {
+    let level = [...leafHashes];
+    if (level.length === 0) {
+        return undefined;
+    }
+    while (level.length > 1) {
+        const next: Uint8Array[] = [];
+        for (let index = 0; index < level.length; index += 2) {
+            const left = level[index];
+            const right = level[index + 1];
+            if (left === undefined) {
+                return undefined;
+            }
+            next.push(
+                right === undefined ? left : sha256(concatBytes([Uint8Array.of(1), left, right])),
+            );
+        }
+        level = next;
+    }
+    return level[0];
+}
+
+function sha256(bytes: Uint8Array): Uint8Array {
+    return new Uint8Array(createHash("sha256").update(bytes).digest());
+}
+
+function compareBigint(left: bigint, right: bigint): number {
+    return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function requireAffectedCells(input: RelayerSubmitInput): AffectedCellsArtifact {

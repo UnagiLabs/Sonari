@@ -838,6 +838,9 @@ jobs:
           if [[ -n "${FLOOR_CENSUS_MAIN_POOL:-}" ]]; then
             extra_parameter_overrides+=("FloorCensusMainPool=$FLOOR_CENSUS_MAIN_POOL")
           fi
+          if [[ -n "${FLOOR_CENSUS_CELL_COUNT_INDEX:-}" ]]; then
+            extra_parameter_overrides+=("FloorCensusCellCountIndex=$FLOOR_CENSUS_CELL_COUNT_INDEX")
+          fi
           if [[ -n "${FLOOR_CENSUS_GRAPHQL_URL:-}" ]]; then
             extra_parameter_overrides+=("FloorCensusGraphqlUrl=$FLOOR_CENSUS_GRAPHQL_URL")
           fi
