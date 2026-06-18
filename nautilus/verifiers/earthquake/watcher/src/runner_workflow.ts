@@ -2933,10 +2933,7 @@ export function readFloorCensusConfigFromEnv(
     const network = readSuiNetwork(process.env.RELAYER_NETWORK);
     const target = process.env.FLOOR_CENSUS_TARGET ?? "";
     const grpcUrl = process.env.RELAYER_GRPC_URL;
-    const graphqlUrl =
-        readOptionalEnv("FLOOR_CENSUS_GRAPHQL_URL") ??
-        readOptionalEnv("SONARI_SUI_GRAPHQL_URL") ??
-        defaultSuiGraphqlUrl(network);
+    const graphqlUrl = readOptionalEnv("SONARI_SUI_GRAPHQL_URL") ?? defaultSuiGraphqlUrl(network);
     const missing = [
         ["FLOOR_CENSUS_TARGET", target],
         ["FLOOR_CENSUS_PAUSE_STATE", process.env.FLOOR_CENSUS_PAUSE_STATE],

@@ -44,7 +44,7 @@ jobs:
       WORLD_ID_ACTION: ${{ vars.SONARI_WORLD_ID_ACTION }}
       WORLD_ID_API_BASE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_API_BASE }}
       WORLD_ID_PROOF_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_PROOF_MODE }}
-      RELAYER_SUI_GRAPHQL_URL: ${{ vars.SONARI_SUI_GRAPHQL_URL }}
+      SONARI_SUI_GRAPHQL_URL: ${{ vars.SONARI_SUI_GRAPHQL_URL }}
       NITRO_CLI_TAG: v1.4.4
       S3_PREFIX: sonari-verifier-runner
       # testnet 互換の pinned Sui CLI（PCR 自動再登録で sui client / keytool を使う）。
@@ -79,7 +79,7 @@ jobs:
             NITRO_ENCLAVE_PCR3
             WORLD_ID_APP_ID
             WORLD_ID_ACTION
-            RELAYER_SUI_GRAPHQL_URL
+            SONARI_SUI_GRAPHQL_URL
           )
           for name in "${required_names[@]}"; do
             if [[ -z "${!name}" ]]; then
@@ -793,16 +793,16 @@ jobs:
           RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}
           RELAYER_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
           RELAYER_GRPC_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}
-          RELAYER_SUI_GRAPHQL_URL: ${{ vars.SONARI_SUI_GRAPHQL_URL }}
+          SONARI_SUI_GRAPHQL_URL: ${{ vars.SONARI_SUI_GRAPHQL_URL }}
           RELAYER_SENDER_ADDRESS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}
           RELAYER_SIGNER_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}
           RELAYER_ALLOW_SUBMIT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}
           IDENTITY_RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_IDENTITY_RELAYER_MODE }}
           # affected-cells-proof-worker の URL は dapp と同じ repo-level 単一情報源を使う。
           AFFECTED_PROOF_WORKER_URL: ${{ vars.SONARI_AFFECTED_PROOF_WORKER_URL }}
-          # FloorCensus mode / GraphQL URL は repo-level Variables のまま。target と object ids は resolver 由来。
+          # FloorCensus mode は repo-level Variables のまま。GraphQL URL は SONARI_SUI_GRAPHQL_URL に一本化。
+          # target と object ids は resolver 由来。
           FLOOR_CENSUS_MODE: ${{ vars.SONARI_FLOOR_CENSUS_MODE }}
-          FLOOR_CENSUS_GRAPHQL_URL: ${{ vars.SONARI_FLOOR_CENSUS_GRAPHQL_URL }}
         run: |
           set -euo pipefail
           mapfile -t deploy_plan_parameter_overrides < <(
@@ -858,7 +858,7 @@ jobs:
           if [[ -n "${RELAYER_GRPC_URL:-}" ]]; then
             extra_parameter_overrides+=("RelayerGrpcUrl=$RELAYER_GRPC_URL")
           fi
-          extra_parameter_overrides+=("SonariSuiGraphqlUrl=$RELAYER_SUI_GRAPHQL_URL")
+          extra_parameter_overrides+=("SonariSuiGraphqlUrl=$SONARI_SUI_GRAPHQL_URL")
           if [[ -n "${RELAYER_SENDER_ADDRESS:-}" ]]; then
             extra_parameter_overrides+=("RelayerSenderAddress=$RELAYER_SENDER_ADDRESS")
           fi
@@ -909,9 +909,6 @@ jobs:
           fi
           if [[ -n "${FLOOR_CENSUS_CELL_COUNT_INDEX:-}" ]]; then
             extra_parameter_overrides+=("FloorCensusCellCountIndex=$FLOOR_CENSUS_CELL_COUNT_INDEX")
-          fi
-          if [[ -n "${FLOOR_CENSUS_GRAPHQL_URL:-}" ]]; then
-            extra_parameter_overrides+=("FloorCensusGraphqlUrl=$FLOOR_CENSUS_GRAPHQL_URL")
           fi
 
           aws cloudformation deploy \

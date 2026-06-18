@@ -764,15 +764,16 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("FloorCensusCategoryPool:");
         expect(template).toContain("FloorCensusMainPool:");
         expect(template).toContain("FloorCensusCellCountIndex:");
-        expect(template).toContain("FloorCensusGraphqlUrl:");
         expect(template).toContain("FLOOR_CENSUS_MODE: !Ref FloorCensusMode");
         expect(template).toContain("FLOOR_CENSUS_TARGET: !Ref FloorCensusTarget");
         expect(template).toContain("FLOOR_CENSUS_PAUSE_STATE: !Ref FloorCensusPauseState");
         expect(template).toContain("FLOOR_CENSUS_CATEGORY_POOL: !Ref FloorCensusCategoryPool");
         expect(template).toContain("FLOOR_CENSUS_MAIN_POOL: !Ref FloorCensusMainPool");
         expect(template).toContain("FLOOR_CENSUS_CELL_COUNT_INDEX: !Ref FloorCensusCellCountIndex");
-        expect(template).toContain("FLOOR_CENSUS_GRAPHQL_URL: !Ref FloorCensusGraphqlUrl");
+        // GraphQL URL は SonariSuiGraphqlUrl 単一 parameter / SONARI_SUI_GRAPHQL_URL env に一本化する。
         expect(template).toContain("SONARI_SUI_GRAPHQL_URL: !Ref SonariSuiGraphqlUrl");
+        expect(template).not.toContain("FloorCensusGraphqlUrl");
+        expect(template).not.toContain("FLOOR_CENSUS_GRAPHQL_URL");
         expect(template).not.toContain("FloorCensusJsonRpcUrl");
         expect(template).not.toContain("FLOOR_CENSUS_JSON_RPC_URL");
 

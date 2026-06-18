@@ -564,15 +564,19 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
 
         expectContainsAll(workflow, [
             "FLOOR_CENSUS_MODE: $" + "{{ vars.SONARI_FLOOR_CENSUS_MODE }}",
-            "FLOOR_CENSUS_GRAPHQL_URL: $" + "{{ vars.SONARI_FLOOR_CENSUS_GRAPHQL_URL }}",
             "FloorCensusMode=$FLOOR_CENSUS_MODE",
             "FloorCensusTarget=$FLOOR_CENSUS_TARGET",
             "FloorCensusPauseState=$FLOOR_CENSUS_PAUSE_STATE",
             "FloorCensusCategoryPool=$FLOOR_CENSUS_CATEGORY_POOL",
             "FloorCensusMainPool=$FLOOR_CENSUS_MAIN_POOL",
             "FloorCensusCellCountIndex=$FLOOR_CENSUS_CELL_COUNT_INDEX",
-            "FloorCensusGraphqlUrl=$FLOOR_CENSUS_GRAPHQL_URL",
         ]);
+        // GraphQL URL は SONARI_SUI_GRAPHQL_URL 単一の repo-level variable に一本化する。
+        // 旧 FloorCensus 専用 GraphQL 変数とエイリアスは残さない。
+        expect(workflow).not.toContain("SONARI_FLOOR_CENSUS_GRAPHQL_URL");
+        expect(workflow).not.toContain("FLOOR_CENSUS_GRAPHQL_URL");
+        expect(workflow).not.toContain("FloorCensusGraphqlUrl");
+        expect(workflow).not.toContain("RELAYER_SUI_GRAPHQL_URL");
         expect(workflow).not.toContain("SONARI_FLOOR_CENSUS_JSON_RPC_URL");
         expect(workflow).not.toContain("FLOOR_CENSUS_JSON_RPC_URL");
         expect(workflow).not.toContain("FloorCensusJsonRpcUrl");
@@ -607,5 +611,10 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         );
         expect(workflow).toContain("RelayerMode=$RELAYER_MODE");
         expect(workflow).toContain("RelayerNetwork=$RELAYER_NETWORK");
+        // Sui GraphQL URL も単一情報源（SONARI_SUI_GRAPHQL_URL）から取り、watcher と floor census が共有する。
+        expect(workflow).toContain(
+            "SONARI_SUI_GRAPHQL_URL: $" + "{{ vars.SONARI_SUI_GRAPHQL_URL }}",
+        );
+        expect(workflow).toContain("SonariSuiGraphqlUrl=$SONARI_SUI_GRAPHQL_URL");
     });
 });

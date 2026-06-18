@@ -2245,21 +2245,21 @@ describe("AWS runner workflow helper", () => {
         expect(reader.secretReads).toEqual(["arn:aws:secretsmanager:relayer-signer"]);
     });
 
-    it("uses FLOOR_CENSUS_GRAPHQL_URL before other floor census endpoint sources", () => {
+    it("uses the single SONARI_SUI_GRAPHQL_URL and ignores the removed FLOOR_CENSUS_GRAPHQL_URL", () => {
         setRequiredFloorCensusEnv();
+        // 旧 FLOOR_CENSUS_GRAPHQL_URL が残っていても無視し、単一情報源だけを使う。
         process.env.FLOOR_CENSUS_GRAPHQL_URL = "https://floor.example/graphql";
         process.env.SONARI_SUI_GRAPHQL_URL = "https://sonari.example/graphql";
-        process.env.FLOOR_CENSUS_JSON_RPC_URL = "https://fullnode.example:443";
 
         const config = readFloorCensusConfigFromEnv(
             new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
         );
 
         expect(config?.reader).toBeInstanceOf(GraphqlFloorCensusReader);
-        expect(readReaderEndpoint(config?.reader)).toBe("https://floor.example/graphql");
+        expect(readReaderEndpoint(config?.reader)).toBe("https://sonari.example/graphql");
     });
 
-    it("falls back to SONARI_SUI_GRAPHQL_URL for floor census GraphQL reads", () => {
+    it("uses SONARI_SUI_GRAPHQL_URL for floor census GraphQL reads", () => {
         setRequiredFloorCensusEnv();
         process.env.SONARI_SUI_GRAPHQL_URL = "https://sonari.example/graphql";
 
