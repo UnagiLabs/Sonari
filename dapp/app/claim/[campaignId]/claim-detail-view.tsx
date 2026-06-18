@@ -18,6 +18,10 @@ import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoadingIndicator } from "../../components/loading-indicator";
+import {
+    type MembershipDappGenesisObjects,
+    resolveMembershipDappGenesisObjects,
+} from "../../chain/genesis-objects";
 import { SiteTopbar } from "../../i18n/site-topbar";
 import { type MembershipPassData, readMembershipPass } from "../../mypage/membership-pass-read";
 import { MEMBERSHIP_TERMS_VERSION } from "../../register/terms-version";
@@ -45,7 +49,7 @@ import {
     readClaimCampaigns,
     readClaimEligibility,
 } from "../claim-campaigns";
-import { type ClaimConfig, readClaimConfig } from "../claim-config";
+import { readClaimConfig } from "../claim-config";
 import { buildClaimFlowActions, type ClaimFlowAction } from "../claim-flow";
 import { resolveWorldIdClaimIdentity } from "../claim-identity";
 import { type ClaimMessage, resolveClaimProofError, resolveClaimTxError } from "../claim-messages";
@@ -116,6 +120,12 @@ type EligibilityState =
     | { readonly status: "ready"; readonly eligibility: ClaimEligibility }
     | { readonly status: "failed"; readonly message: string };
 
+type GenesisObjectsState =
+    | { readonly status: "idle" }
+    | { readonly status: "loading" }
+    | { readonly status: "ready"; readonly objects: MembershipDappGenesisObjects }
+    | { readonly status: "failed"; readonly message: string };
+
 const EMPTY_DUPLICATE_KEY_HASH =
     "0x0000000000000000000000000000000000000000000000000000000000000000";
 const ELIGIBILITY_REFRESH_INTERVAL_MS = 30_000;
@@ -151,6 +161,9 @@ export function ClaimDetailView({
     const [eligibilityState, setEligibilityState] = useState<EligibilityState>({
         status: "idle",
     });
+    const [genesisObjectsState, setGenesisObjectsState] = useState<GenesisObjectsState>({
+        status: "idle",
+    });
 
     const resetClaimProgress = useCallback(() => {
         setProofState({ status: "idle" });
@@ -171,6 +184,8 @@ export function ClaimDetailView({
 
     const isWalletConnected = account !== null;
     const membershipPass = passState.status === "ready" ? passState.pass : null;
+    const genesisObjects =
+        genesisObjectsState.status === "ready" ? genesisObjectsState.objects : null;
     const identityMaterial =
         claimConfig === null
             ? { kind: "missing" as const, reason: "world_id_config" as const }
@@ -180,8 +195,8 @@ export function ClaimDetailView({
                   idkitResponse: worldIdResponse,
               });
     const txObjects =
-        claimConfig !== null && membershipPass !== null && selectedEvent !== null
-            ? buildClaimTransactionObjects(claimConfig, membershipPass, selectedEvent)
+        genesisObjects !== null && membershipPass !== null && selectedEvent !== null
+            ? buildClaimTransactionObjects(genesisObjects, membershipPass, selectedEvent)
             : null;
     const isClaimInFlight = txState.status === "building" || txState.status === "submitting";
     const claimEligibility =
@@ -211,6 +226,44 @@ export function ClaimDetailView({
     const worldIdNotice = buildWorldIdNotice(
         worldIdRequired && identityMaterial.kind === "missing" ? identityMaterial.reason : null,
     );
+
+    useEffect(() => {
+        resetClaimProgress();
+
+        if (claimConfig === null) {
+            setGenesisObjectsState({ status: "idle" });
+            return;
+        }
+
+        let cancelled = false;
+        setGenesisObjectsState({ status: "loading" });
+        resolveMembershipDappGenesisObjects(client, { packageId: claimConfig.packageId })
+            .then((result) => {
+                if (cancelled) {
+                    return;
+                }
+                if (result.kind === "ok") {
+                    setGenesisObjectsState({ status: "ready", objects: result.objects });
+                    return;
+                }
+                setGenesisObjectsState({ status: "failed", message: result.message });
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    setGenesisObjectsState({
+                        status: "failed",
+                        message:
+                            error instanceof Error
+                                ? error.message
+                                : "Failed to resolve claim objects.",
+                    });
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [claimConfig, client, resetClaimProgress]);
 
     // 地図プレビュー用の CellSource（被災セル証明とは別経路）。
     // selectedEvent → DisasterClaimableProgram → resolvePreviewCellSource の流れ。
@@ -272,6 +325,10 @@ export function ClaimDetailView({
             setPassState({ status: "failed", message: "Claim config is not ready." });
             return;
         }
+        if (genesisObjects === null) {
+            setPassState({ status: "idle" });
+            return;
+        }
 
         let cancelled = false;
         setPassState({ status: "loading" });
@@ -279,7 +336,7 @@ export function ClaimDetailView({
             client,
             account.address,
             claimConfig.packageId,
-            claimConfig.identityRegistryId,
+            genesisObjects.identityRegistry,
         )
             .then((result) => {
                 if (cancelled) {
@@ -310,7 +367,7 @@ export function ClaimDetailView({
         return () => {
             cancelled = true;
         };
-    }, [account, claimConfig, client, passReadNonce, resetClaimProgress]);
+    }, [account, claimConfig, client, genesisObjects, passReadNonce, resetClaimProgress]);
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: eligibilityReadNonce is a retry trigger.
     useEffect(() => {
@@ -855,16 +912,16 @@ export function ClaimDetailView({
 }
 
 function buildClaimTransactionObjects(
-    config: ClaimConfig,
+    objects: MembershipDappGenesisObjects,
     pass: MembershipPassData,
     event: ClaimCampaignState,
 ): ClaimTransactionObjectConfig {
     return {
-        pauseState: config.pauseStateId,
-        membershipRegistry: config.membershipRegistryId,
+        pauseState: objects.pauseState,
+        membershipRegistry: objects.membershipRegistry,
         campaign: event.campaignId,
         disasterEvent: event.disasterEventId,
-        identityRegistry: config.identityRegistryId,
+        identityRegistry: objects.identityRegistry,
         pass: pass.objectId,
     };
 }

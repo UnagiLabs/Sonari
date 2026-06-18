@@ -3,18 +3,12 @@ const WORLD_ID_ACTION_PATTERN = /^sonari_membership_register_v\d+$/u;
 
 export interface ClaimEnv {
     readonly NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID?: string | undefined;
-    readonly NEXT_PUBLIC_SONARI_IDENTITY_PAUSE_STATE_ID?: string | undefined;
-    readonly NEXT_PUBLIC_SONARI_MEMBERSHIP_REGISTRY_ID?: string | undefined;
-    readonly NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID?: string | undefined;
     readonly NEXT_PUBLIC_WORLD_ID_RP_ID?: string | undefined;
     readonly NEXT_PUBLIC_WORLD_ID_ACTION?: string | undefined;
 }
 
 export interface ClaimConfig {
     readonly packageId: string;
-    readonly pauseStateId: string;
-    readonly membershipRegistryId: string;
-    readonly identityRegistryId: string;
     readonly worldIdRpId: string;
     readonly worldIdAction: string;
 }
@@ -28,12 +22,6 @@ export function readClaimConfig(env: ClaimEnv = readProcessClaimEnv()): ClaimCon
     const values = {
         NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID:
             env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID?.trim() ?? "",
-        NEXT_PUBLIC_SONARI_IDENTITY_PAUSE_STATE_ID:
-            env.NEXT_PUBLIC_SONARI_IDENTITY_PAUSE_STATE_ID?.trim() ?? "",
-        NEXT_PUBLIC_SONARI_MEMBERSHIP_REGISTRY_ID:
-            env.NEXT_PUBLIC_SONARI_MEMBERSHIP_REGISTRY_ID?.trim() ?? "",
-        NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID:
-            env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID?.trim() ?? "",
         NEXT_PUBLIC_WORLD_ID_RP_ID: env.NEXT_PUBLIC_WORLD_ID_RP_ID?.trim() ?? "",
     };
 
@@ -62,9 +50,6 @@ export function readClaimConfig(env: ClaimEnv = readProcessClaimEnv()): ClaimCon
         kind: "ok",
         config: {
             packageId: values.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID,
-            pauseStateId: values.NEXT_PUBLIC_SONARI_IDENTITY_PAUSE_STATE_ID,
-            membershipRegistryId: values.NEXT_PUBLIC_SONARI_MEMBERSHIP_REGISTRY_ID,
-            identityRegistryId: values.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID,
             worldIdRpId: values.NEXT_PUBLIC_WORLD_ID_RP_ID,
             worldIdAction: action.value,
         },
@@ -75,12 +60,6 @@ function readProcessClaimEnv(): ClaimEnv {
     return {
         NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID:
             process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID,
-        NEXT_PUBLIC_SONARI_IDENTITY_PAUSE_STATE_ID:
-            process.env.NEXT_PUBLIC_SONARI_IDENTITY_PAUSE_STATE_ID,
-        NEXT_PUBLIC_SONARI_MEMBERSHIP_REGISTRY_ID:
-            process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_REGISTRY_ID,
-        NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID:
-            process.env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID,
         NEXT_PUBLIC_WORLD_ID_RP_ID: process.env.NEXT_PUBLIC_WORLD_ID_RP_ID,
         NEXT_PUBLIC_WORLD_ID_ACTION: process.env.NEXT_PUBLIC_WORLD_ID_ACTION,
     };
