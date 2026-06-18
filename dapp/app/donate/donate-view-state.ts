@@ -1,7 +1,9 @@
+import type { ClaimCampaignState } from "../claim/claim-campaigns";
 import { suiExplorerTxUrl } from "../wallet/sui-explorer";
 import type { WalletNetwork } from "../wallet/wallet-network";
 import type { CampaignDestination, CategoryDestination } from "./donate-destinations";
 import type { DonationAmountErrorCode, DonationAmountValidationResult } from "./donate-amount";
+import type { EmergencyBannerCampaign } from "./emergency-banner-state";
 
 export type CategoryListItem =
     | {
@@ -307,6 +309,25 @@ export function selectEmergencyBannerCampaign(
         return null;
     }
     return findActiveEmergencyCampaign(state.campaigns, nowMs);
+}
+
+/**
+ * 災害 Campaign 一覧（DisasterEvent 紐付け済み）から緊急バナー用の情報を選ぶ。
+ * 寄付受付中（donationEndMs > now）の先頭を 1 件選び、表示名には災害イベント名
+ * （ClaimCampaignState.title）を使う。CampaignCreated イベントだけでは title を
+ * 取れないため、title を持つ ClaimCampaignState から選定する。
+ * 受付中が無ければ null（バナー非表示）。
+ */
+export function selectEmergencyBannerFromClaimCampaigns(
+    campaigns: readonly ClaimCampaignState[],
+    nowMs: bigint,
+): EmergencyBannerCampaign | null {
+    for (const campaign of campaigns) {
+        if (BigInt(campaign.donationEndMs) > nowMs) {
+            return { id: campaign.campaignId, label: campaign.title };
+        }
+    }
+    return null;
 }
 
 export type DonateTxState =
