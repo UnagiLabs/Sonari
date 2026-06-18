@@ -2,8 +2,8 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use census_tee::{
-    AffectedCell, AffectedCellsArtifact, CensusInputBundle, CountedCell, INTENT, VERIFIER_FAMILY,
-    VERIFIER_VERSION, compute_affected_cells_root, compute_floor_census_snapshot,
+    AffectedCell, AffectedCellsArtifact, CensusSnapshotBundle, CountedCell, INTENT,
+    VERIFIER_FAMILY, VERIFIER_VERSION, compute_affected_cells_root, compute_floor_census_snapshot,
 };
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
@@ -183,7 +183,7 @@ fn valid_counted_cells_root() -> serde_json::Value {
     };
     let affected_cells_root = compute_affected_cells_root(event_uid, 7, &affected_cells).unwrap();
     serde_json::Value::String(
-        compute_floor_census_snapshot(&CensusInputBundle {
+        compute_floor_census_snapshot(&CensusSnapshotBundle {
             event_uid: event_uid.to_owned(),
             event_revision: 7,
             occurred_at_ms: 1_000,

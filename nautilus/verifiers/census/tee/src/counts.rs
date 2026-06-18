@@ -7,7 +7,23 @@ use sonari_tee_core::{sha256_bytes, to_hex};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CensusInputBundle {
+    pub package_id: String,
+    pub event_uid: String,
+    pub event_revision: u32,
+    pub occurred_at_ms: u64,
+    pub affected_cells_root: String,
+    pub issued_at_ms: u64,
+    pub campaign_id: String,
+    pub disaster_event_id: String,
+    pub membership_registry_id: String,
+    pub affected_cells: AffectedCellsArtifact,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CensusSnapshotBundle {
     pub event_uid: String,
     pub event_revision: u32,
     pub occurred_at_ms: u64,
@@ -23,6 +39,7 @@ pub struct CensusInputBundle {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CountedCell {
     pub h3_cell: String,
     pub cell_band: u64,
@@ -35,6 +52,13 @@ pub struct FloorCensusSnapshot {
     pub counted_cells_root: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CensusResolvedSnapshot {
+    pub cell_count_index_id: String,
+    pub census_checkpoint: u64,
+    pub counted_cells: Vec<CountedCell>,
+}
+
 #[derive(Serialize)]
 struct CountedCellLeafBcs {
     h3_cell: u64,
@@ -43,12 +67,12 @@ struct CountedCellLeafBcs {
     count_at_census_checkpoint: u64,
 }
 
-pub fn compute_floor_census_counts(bundle: &CensusInputBundle) -> Result<[u64; 3], CensusError> {
+pub fn compute_floor_census_counts(bundle: &CensusSnapshotBundle) -> Result<[u64; 3], CensusError> {
     Ok(compute_floor_census_snapshot(bundle)?.counts)
 }
 
 pub fn compute_floor_census_snapshot(
-    bundle: &CensusInputBundle,
+    bundle: &CensusSnapshotBundle,
 ) -> Result<FloorCensusSnapshot, CensusError> {
     validate_affected_cells_root(
         &bundle.event_uid,
@@ -85,7 +109,7 @@ pub fn compute_floor_census_snapshot(
 }
 
 pub fn process_floor_census_bundle(
-    bundle: &CensusInputBundle,
+    bundle: &CensusSnapshotBundle,
 ) -> Result<FloorCensusResult, CensusError> {
     validate_census_context(bundle)?;
     let snapshot = compute_floor_census_snapshot(bundle)?;
@@ -108,7 +132,42 @@ pub fn process_floor_census_bundle(
     })
 }
 
-fn validate_census_context(bundle: &CensusInputBundle) -> Result<(), CensusError> {
+pub fn process_floor_census_input_bundle(
+    bundle: &CensusInputBundle,
+    snapshot: CensusResolvedSnapshot,
+) -> Result<FloorCensusResult, CensusError> {
+    validate_census_input_bundle_context(bundle)?;
+    process_floor_census_bundle(&CensusSnapshotBundle {
+        event_uid: bundle.event_uid.clone(),
+        event_revision: bundle.event_revision,
+        occurred_at_ms: bundle.occurred_at_ms,
+        affected_cells_root: bundle.affected_cells_root.clone(),
+        issued_at_ms: bundle.issued_at_ms,
+        campaign_id: bundle.campaign_id.clone(),
+        disaster_event_id: bundle.disaster_event_id.clone(),
+        membership_registry_id: bundle.membership_registry_id.clone(),
+        cell_count_index_id: snapshot.cell_count_index_id,
+        census_checkpoint: snapshot.census_checkpoint,
+        affected_cells: bundle.affected_cells.clone(),
+        counted_cells: snapshot.counted_cells,
+    })
+}
+
+pub fn validate_census_input_bundle_context(bundle: &CensusInputBundle) -> Result<(), CensusError> {
+    validate_object_id(&bundle.package_id, "package_id")?;
+    validate_object_id(&bundle.campaign_id, "campaign_id")?;
+    validate_object_id(&bundle.disaster_event_id, "disaster_event_id")?;
+    validate_object_id(&bundle.membership_registry_id, "membership_registry_id")?;
+    validate_affected_cells_root(
+        &bundle.event_uid,
+        bundle.event_revision,
+        &bundle.affected_cells_root,
+        &bundle.affected_cells,
+    )?;
+    Ok(())
+}
+
+fn validate_census_context(bundle: &CensusSnapshotBundle) -> Result<(), CensusError> {
     validate_object_id(&bundle.campaign_id, "campaign_id")?;
     validate_object_id(&bundle.disaster_event_id, "disaster_event_id")?;
     validate_object_id(&bundle.membership_registry_id, "membership_registry_id")?;
@@ -272,11 +331,12 @@ fn parse_canonical_u64_decimal(value: &str, field: &str) -> Result<u64, CensusEr
 
 #[cfg(test)]
 mod tests {
-    use super::{CensusInputBundle, CountedCell};
+    use super::{CensusInputBundle, CensusResolvedSnapshot, CensusSnapshotBundle, CountedCell};
     use crate::{
         AffectedCell, AffectedCellsArtifact, H3_RESOLUTION, INTENT, SHARD_COUNT, VERIFIER_FAMILY,
         VERIFIER_VERSION, compute_affected_cells_root, compute_floor_census_counts,
         compute_floor_census_snapshot, process_floor_census_bundle,
+        process_floor_census_input_bundle,
     };
 
     const EVENT_UID: &str = "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd";
@@ -311,11 +371,11 @@ mod tests {
         }
     }
 
-    fn valid_bundle() -> CensusInputBundle {
+    fn valid_bundle() -> CensusSnapshotBundle {
         let affected_cells = affected_cells();
         let affected_cells_root =
             compute_affected_cells_root(EVENT_UID, 7, &affected_cells).unwrap();
-        CensusInputBundle {
+        CensusSnapshotBundle {
             event_uid: EVENT_UID.to_owned(),
             event_revision: 7,
             occurred_at_ms: 1_000,
@@ -469,6 +529,37 @@ mod tests {
         assert_eq!(result.registered_members_by_band, vec![1, 1, 1]);
         assert_eq!(result.counted_cells_root, expected_root);
         assert_eq!(result.issued_at_ms, 1_234);
+    }
+
+    #[test]
+    fn process_floor_census_input_bundle_uses_resolved_snapshot_context() {
+        let snapshot_bundle = valid_bundle();
+        let input = CensusInputBundle {
+            package_id: format!("0x{}", "aa".repeat(32)),
+            event_uid: snapshot_bundle.event_uid.clone(),
+            event_revision: snapshot_bundle.event_revision,
+            occurred_at_ms: snapshot_bundle.occurred_at_ms,
+            affected_cells_root: snapshot_bundle.affected_cells_root.clone(),
+            issued_at_ms: snapshot_bundle.issued_at_ms,
+            campaign_id: snapshot_bundle.campaign_id.clone(),
+            disaster_event_id: snapshot_bundle.disaster_event_id.clone(),
+            membership_registry_id: snapshot_bundle.membership_registry_id.clone(),
+            affected_cells: snapshot_bundle.affected_cells.clone(),
+        };
+        let snapshot = CensusResolvedSnapshot {
+            cell_count_index_id: snapshot_bundle.cell_count_index_id.clone(),
+            census_checkpoint: snapshot_bundle.census_checkpoint,
+            counted_cells: snapshot_bundle.counted_cells.clone(),
+        };
+
+        let result = process_floor_census_input_bundle(&input, snapshot).unwrap();
+
+        assert_eq!(
+            result.cell_count_index_id,
+            snapshot_bundle.cell_count_index_id
+        );
+        assert_eq!(result.census_checkpoint, snapshot_bundle.census_checkpoint);
+        assert_eq!(result.registered_members_by_band, vec![1, 2, 3]);
     }
 
     #[test]

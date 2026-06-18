@@ -1,9 +1,10 @@
 use census_tee::server::{
-    CensusProcessHandler, finalize_process_output, parse_process_data_envelope,
+    CensusProcessHandler, CensusProcessHandlerWithResolver, CensusSnapshotResolver,
+    finalize_process_output, parse_process_data_envelope,
 };
 use census_tee::{
-    AffectedCell, AffectedCellsArtifact, CensusInputBundle, CountedCell,
-    compute_affected_cells_root, compute_floor_census_snapshot,
+    AffectedCell, AffectedCellsArtifact, CensusError, CensusInputBundle, CensusResolvedSnapshot,
+    CensusSnapshotBundle, CountedCell, compute_affected_cells_root, compute_floor_census_snapshot,
     graphql::{CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, CENSUS_GRAPHQL_NETWORK_KEY},
 };
 use sonari_tee_core::{
@@ -12,7 +13,7 @@ use sonari_tee_core::{
 
 #[test]
 fn server_handler_returns_non_empty_signable_output() {
-    let handler = CensusProcessHandler;
+    let handler = CensusProcessHandlerWithResolver::new(FixedSnapshotResolver);
 
     let output = handler
         .process(
@@ -71,7 +72,7 @@ fn server_process_data_envelope_rejects_wrong_verifier_config_key() {
 
 #[test]
 fn server_finalization_injects_signature_public_key_and_registration_metadata() {
-    let handler = CensusProcessHandler;
+    let handler = CensusProcessHandlerWithResolver::new(FixedSnapshotResolver);
     let output = handler
         .process(
             serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
@@ -158,8 +159,6 @@ fn valid_bundle_json() -> serde_json::Value {
         ],
     };
     let affected_cells_root = compute_affected_cells_root(event_uid, 7, &affected_cells).unwrap();
-    let counted_cells = valid_counted_cells();
-
     serde_json::json!({
         "event_uid": event_uid,
         "event_revision": 7,
@@ -169,10 +168,8 @@ fn valid_bundle_json() -> serde_json::Value {
         "campaign_id": format!("0x{}", "44".repeat(32)),
         "disaster_event_id": format!("0x{}", "55".repeat(32)),
         "membership_registry_id": format!("0x{}", "22".repeat(32)),
-        "cell_count_index_id": format!("0x{}", "33".repeat(32)),
-        "census_checkpoint": 345,
-        "affected_cells": affected_cells,
-        "counted_cells": counted_cells
+        "package_id": format!("0x{}", "99".repeat(32)),
+        "affected_cells": affected_cells
     })
 }
 
@@ -202,7 +199,7 @@ fn expected_counted_cells_root() -> serde_json::Value {
     };
     let affected_cells_root = compute_affected_cells_root(event_uid, 7, &affected_cells).unwrap();
     serde_json::Value::String(
-        compute_floor_census_snapshot(&CensusInputBundle {
+        compute_floor_census_snapshot(&CensusSnapshotBundle {
             event_uid: event_uid.to_owned(),
             event_revision: 7,
             occurred_at_ms: 1_000,
@@ -236,4 +233,21 @@ fn valid_counted_cells() -> Vec<CountedCell> {
             active_count: "7".to_owned(),
         },
     ]
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FixedSnapshotResolver;
+
+impl CensusSnapshotResolver for FixedSnapshotResolver {
+    fn resolve_snapshot(
+        &self,
+        _bundle: &CensusInputBundle,
+        _ctx: &TeeContext,
+    ) -> Result<CensusResolvedSnapshot, CensusError> {
+        Ok(CensusResolvedSnapshot {
+            cell_count_index_id: format!("0x{}", "33".repeat(32)),
+            census_checkpoint: 345,
+            counted_cells: valid_counted_cells(),
+        })
+    }
 }

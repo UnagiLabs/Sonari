@@ -1,4 +1,4 @@
-use crate::CensusError;
+use crate::{CensusError, CensusInputBundle, CensusResolvedSnapshot, CountedCell};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use reqwest::Url;
@@ -14,6 +14,49 @@ const GRAPHQL_REQUEST_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_CELL_COUNT_BATCH_SIZE: usize = 100;
 const DEFAULT_SHARD_CONCURRENCY_LIMIT: usize = 8;
 const DEFAULT_GRAPHQL_MAX_ATTEMPTS: u32 = 4;
+const LATEST_CHECKPOINT_QUERY: &str = r#"
+query SonariCensusLatestCheckpoints($last: Int!) {
+  checkpoints(last: $last) {
+    nodes {
+      sequenceNumber
+      timestampMs
+    }
+  }
+}
+"#;
+const CELL_COUNT_INDEX_EVENTS_QUERY: &str = r#"
+query SonariCensusCellCountIndexEvents($eventType: String!) {
+  events(filter: { type: $eventType }) {
+    nodes {
+      contents {
+        json
+      }
+    }
+  }
+}
+"#;
+const CELL_COUNT_SHARD_EVENTS_QUERY: &str = r#"
+query SonariCensusCellCountShardEvents($eventType: String!) {
+  events(filter: { type: $eventType }) {
+    nodes {
+      contents {
+        json
+      }
+    }
+  }
+}
+"#;
+const SHARD_COUNTS_QUERY: &str = r#"
+query SonariCensusShardCounts($shardObjectId: SuiAddress!, $checkpoint: UInt53!, $keys: [DynamicFieldName!]!) {
+  object(address: $shardObjectId, atCheckpoint: $checkpoint) {
+    multiGetDynamicFields(keys: $keys) {
+      contents {
+        json
+      }
+    }
+  }
+}
+"#;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SuiGraphqlNetwork {
@@ -153,10 +196,173 @@ impl CensusGraphqlClient {
         })?;
         Ok(Self { endpoint, http })
     }
+
+    pub fn resolve_counted_cells(
+        &self,
+        bundle: &CensusInputBundle,
+    ) -> Result<CensusResolvedSnapshot, CensusError> {
+        let config = ShardCountReadConfig::default();
+        config.validate()?;
+
+        let checkpoint_response = self.query_json(
+            LATEST_CHECKPOINT_QUERY,
+            serde_json::json!({ "last": 100 }),
+            config.max_attempts,
+        )?;
+        let census_checkpoint =
+            parse_latest_checkpoint_at_or_before(&checkpoint_response, bundle.occurred_at_ms)?;
+
+        let index_event_type = format!(
+            "{}::cell_count_index::CellCountIndexPublished",
+            bundle.package_id
+        );
+        let index_response = self.query_json(
+            CELL_COUNT_INDEX_EVENTS_QUERY,
+            serde_json::json!({ "eventType": index_event_type }),
+            config.max_attempts,
+        )?;
+        let index = parse_cell_count_index_metadata(
+            &index_response,
+            &bundle.package_id,
+            &bundle.membership_registry_id,
+        )?;
+
+        let grouped = group_affected_cells_by_shard(&bundle.affected_cells.affected_cells)?;
+        let required_shard_ids = grouped.keys().copied().collect::<HashSet<_>>();
+        let shard_event_type = format!(
+            "{}::cell_count_index::CellCountShardPublished",
+            bundle.package_id
+        );
+        let shard_response = self.query_json(
+            CELL_COUNT_SHARD_EVENTS_QUERY,
+            serde_json::json!({ "eventType": shard_event_type }),
+            config.max_attempts,
+        )?;
+        let shard_object_ids = parse_cell_count_shard_object_ids(
+            &shard_response,
+            &bundle.package_id,
+            &index.cell_count_index_id,
+            &required_shard_ids,
+        )?;
+        ensure_all_required_shards_resolved(&required_shard_ids, &shard_object_ids)?;
+
+        let mut counted_cells = Vec::new();
+        for (shard_id, cells) in grouped {
+            let shard_object_id = shard_object_ids.get(&shard_id).ok_or_else(|| {
+                CensusError::InvalidPayload(format!(
+                    "CellCountShardPublished event not found for shard_id {shard_id}"
+                ))
+            })?;
+            for batch in shard_count_batches(&cells, &config)? {
+                let response = self.query_json(
+                    SHARD_COUNTS_QUERY,
+                    shard_count_query_variables(shard_object_id, census_checkpoint, &batch)?,
+                    config.max_attempts,
+                )?;
+                counted_cells.extend(
+                    parse_shard_count_response(&response, &batch)?
+                        .into_iter()
+                        .map(counted_cell_from_snapshot),
+                );
+            }
+        }
+
+        Ok(CensusResolvedSnapshot {
+            cell_count_index_id: index.cell_count_index_id,
+            census_checkpoint,
+            counted_cells,
+        })
+    }
+
+    fn query_json(
+        &self,
+        query: &str,
+        variables: Value,
+        max_attempts: u32,
+    ) -> Result<Value, CensusError> {
+        let mut last_error: Option<String> = None;
+        for _ in 0..max_attempts {
+            match self.query_json_once(query, variables.clone()) {
+                Ok(value) => return Ok(value),
+                Err(error) => last_error = Some(error.to_string()),
+            }
+        }
+        Err(CensusError::InvalidPayload(format!(
+            "Sui GraphQL query failed after {max_attempts} attempt(s): {}",
+            last_error.unwrap_or_else(|| "unknown error".to_owned())
+        )))
+    }
+
+    fn query_json_once(&self, query: &str, variables: Value) -> Result<Value, CensusError> {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "query": query,
+            "variables": variables,
+        }))
+        .map_err(|error| {
+            CensusError::InvalidPayload(format!("Sui GraphQL request is malformed: {error}"))
+        })?;
+        let response = self
+            .http
+            .post(self.endpoint.clone())
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .send()
+            .map_err(|error| {
+                CensusError::InvalidPayload(format!("Sui GraphQL request failed: {error}"))
+            })?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(CensusError::InvalidPayload(format!(
+                "Sui GraphQL query failed with HTTP {status}"
+            )));
+        }
+        let body = response.text().map_err(|error| {
+            CensusError::InvalidPayload(format!("Sui GraphQL response read failed: {error}"))
+        })?;
+        let value = serde_json::from_str::<Value>(&body).map_err(|error| {
+            CensusError::InvalidPayload(format!("Sui GraphQL response is malformed: {error}"))
+        })?;
+        if let Some(errors) = value.get("errors").and_then(Value::as_array)
+            && !errors.is_empty()
+        {
+            let message = errors
+                .first()
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("unknown GraphQL error");
+            return Err(CensusError::InvalidPayload(format!(
+                "Sui GraphQL query failed: {message}"
+            )));
+        }
+        Ok(value)
+    }
 }
 
 fn non_empty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn ensure_all_required_shards_resolved(
+    required_shard_ids: &HashSet<u64>,
+    shard_object_ids: &HashMap<u64, String>,
+) -> Result<(), CensusError> {
+    for shard_id in required_shard_ids {
+        if !shard_object_ids.contains_key(shard_id) {
+            return Err(CensusError::InvalidPayload(format!(
+                "CellCountShardPublished event not found for shard_id {shard_id}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn counted_cell_from_snapshot(snapshot: CountedCellSnapshot) -> CountedCell {
+    CountedCell {
+        h3_cell: snapshot.h3_cell.to_string(),
+        cell_band: u64::from(snapshot.cell_band),
+        shard_id: snapshot.shard_id,
+        active_count: snapshot.active_count.to_string(),
+    }
 }
 
 pub fn parse_latest_checkpoint_at_or_before(

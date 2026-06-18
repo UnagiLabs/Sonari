@@ -7,7 +7,7 @@ use census_tee::graphql::{CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, CENSUS_GRAPHQL_NE
 use census_tee::server::{
     CensusProcessHandler, census_result_json, finalize_process_output, parse_process_data_envelope,
 };
-use census_tee::{ATTESTATION_PUBLIC_KEY_LABEL, CensusInputBundle, process_floor_census_bundle};
+use census_tee::{ATTESTATION_PUBLIC_KEY_LABEL, CensusSnapshotBundle, process_floor_census_bundle};
 use clap::{Parser, Subcommand};
 use sonari_tee_core::{
     HttpRequest, LocalEd25519Signer, PayloadSigner, ProcessDataHandler, TeeContext, VsockListener,
@@ -67,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn fixture_result(args: FixtureArgs) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let mut stdin = Vec::new();
     io::stdin().read_to_end(&mut stdin)?;
-    let bundle: CensusInputBundle = serde_json::from_slice(&stdin)?;
+    let bundle: CensusSnapshotBundle = serde_json::from_slice(&stdin)?;
     let payload = process_floor_census_bundle(&bundle)?;
     let payload_bcs = payload_bcs_bytes(&payload)?;
     let seed = signing_key_seed_from_env(
