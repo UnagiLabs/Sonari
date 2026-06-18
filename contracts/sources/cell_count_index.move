@@ -122,6 +122,10 @@ public(package) fun assert_membership_registry_id(index: &CellCountIndex, regist
     assert!(index.membership_registry_id == registry_id, EMembershipRegistryMismatch);
 }
 
+public(package) fun index_id(index: &CellCountIndex): ID {
+    object::id(index)
+}
+
 public(package) fun decrement_existing(index: &mut CellCountIndex, h3_cell: u64): u64 {
     let shard_id = shard_id(h3_cell);
     assert!(

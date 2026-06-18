@@ -456,6 +456,8 @@ export function createSetFloorCensusTransaction(input: {
     pauseState: string;
     campaignId: string;
     disasterEventId: string;
+    membershipRegistry: string;
+    cellCountIndex: string;
     verifierRegistry: string;
     categoryPool: string;
     mainPool: string;
@@ -471,6 +473,8 @@ export function createSetFloorCensusTransaction(input: {
             tx.object(input.pauseState),
             tx.object(input.campaignId),
             tx.object(input.disasterEventId),
+            tx.object(input.membershipRegistry),
+            tx.object(input.cellCountIndex),
             tx.object(input.verifierRegistry),
             tx.object(input.categoryPool),
             tx.object(input.mainPool),
@@ -561,6 +565,8 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
                 pauseState: this.config.pauseState,
                 campaignId: campaign.campaignId,
                 disasterEventId: input.disasterEventId,
+                membershipRegistry: this.config.membershipRegistry,
+                cellCountIndex: this.config.cellCountIndex,
                 verifierRegistry: this.config.verifierRegistry,
                 categoryPool: this.config.categoryPool,
                 mainPool: this.config.mainPool,
@@ -671,6 +677,8 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
                 pauseState: this.config.pauseState,
                 campaignId: campaign.campaignId,
                 disasterEventId: input.disasterEventId,
+                membershipRegistry: this.config.membershipRegistry,
+                cellCountIndex: this.config.cellCountIndex,
                 verifierRegistry: this.config.verifierRegistry,
                 categoryPool: this.config.categoryPool,
                 mainPool: this.config.mainPool,
