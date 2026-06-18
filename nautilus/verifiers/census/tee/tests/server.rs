@@ -30,6 +30,19 @@ fn server_handler_returns_non_empty_signable_output() {
         result_json["payload"]["registered_members_by_band"],
         serde_json::json!([1, 1, 0])
     );
+    assert_eq!(
+        result_json["payload"]["membership_registry_id"],
+        format!("0x{}", "22".repeat(32))
+    );
+    assert_eq!(
+        result_json["payload"]["cell_count_index_id"],
+        format!("0x{}", "33".repeat(32))
+    );
+    assert_eq!(result_json["payload"]["census_checkpoint"], 345);
+    assert_eq!(
+        result_json["payload"]["counted_cells_root"],
+        format!("0x{}", "cc".repeat(32))
+    );
     assert_eq!(result_json["signature"], "");
     assert_eq!(result_json["public_key"], "");
 }
@@ -121,7 +134,10 @@ fn valid_bundle_json() -> serde_json::Value {
         "issued_at_ms": 1_234,
         "campaign_id": format!("0x{}", "44".repeat(32)),
         "disaster_event_id": format!("0x{}", "55".repeat(32)),
+        "membership_registry_id": format!("0x{}", "22".repeat(32)),
+        "cell_count_index_id": format!("0x{}", "33".repeat(32)),
         "census_checkpoint": 345,
+        "counted_cells_root": format!("0x{}", "cc".repeat(32)),
         "affected_cells": affected_cells,
         "home_cell_events": [
             {

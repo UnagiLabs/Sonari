@@ -23,6 +23,9 @@ import type { RelayerSigner } from "@sonari/earthquake-relayer";
 
 const eventUid = `0x${"aa".repeat(32)}`;
 const affectedCellsRoot = `0x${"bb".repeat(32)}`;
+const membershipRegistryId = `0x${"22".repeat(32)}`;
+const cellCountIndexId = `0x${"33".repeat(32)}`;
+const countedCellsRoot = `0x${"cc".repeat(32)}`;
 const originalFetch = globalThis.fetch;
 
 const affectedCells = {
@@ -89,7 +92,11 @@ describe("floor census core", () => {
             eventUid,
             eventRevision: 7,
             affectedCellsRoot,
+            membershipRegistryId,
+            cellCountIndexId,
+            censusCheckpoint: 41,
             registeredMembersByBand: [1n, 2n, 3n],
+            countedCellsRoot,
             issuedAtMs: 1_234,
         });
 
@@ -101,10 +108,16 @@ describe("floor census core", () => {
                 "aa".repeat(32),
                 "07000000",
                 "bb".repeat(32),
+                "22".repeat(32),
+                "33".repeat(32),
+                "2900000000000000",
+                "07",
+                "0010000000000000",
                 "03",
                 "0100000000000000",
                 "0200000000000000",
                 "0300000000000000",
+                "cc".repeat(32),
                 "d204000000000000",
             ].join(""),
         );
@@ -116,7 +129,11 @@ describe("floor census core", () => {
             eventUid,
             eventRevision: 7,
             affectedCellsRoot,
+            membershipRegistryId,
+            cellCountIndexId,
+            censusCheckpoint: 41,
             registeredMembersByBand: [1n, 2n, 3n],
+            countedCellsRoot,
             issuedAtMs: 1_234,
         });
 
@@ -134,7 +151,10 @@ describe("floor census core", () => {
             activeLineages: new Set([`0x${"11".repeat(32)}`]),
             campaignId: `0x${"44".repeat(32)}`,
             disasterEventId: `0x${"55".repeat(32)}`,
+            membershipRegistryId,
+            cellCountIndexId,
             censusCheckpoint: 41,
+            countedCellsRoot,
             issuedAtMs: 1_800_000_001_000,
         });
 
@@ -146,7 +166,10 @@ describe("floor census core", () => {
             issued_at_ms: 1_800_000_001_000,
             campaign_id: `0x${"44".repeat(32)}`,
             disaster_event_id: `0x${"55".repeat(32)}`,
+            membership_registry_id: membershipRegistryId,
+            cell_count_index_id: cellCountIndexId,
             census_checkpoint: 41,
+            counted_cells_root: countedCellsRoot,
             home_cell_events: [
                 {
                     lineage: `0x${"11".repeat(32)}`,
@@ -178,7 +201,10 @@ describe("floor census core", () => {
             activeLineages: [],
             campaignId: `0x${"44".repeat(32)}`,
             disasterEventId: `0x${"55".repeat(32)}`,
+            membershipRegistryId,
+            cellCountIndexId,
             censusCheckpoint: 41,
+            countedCellsRoot,
             issuedAtMs: 1_800_000_001_000,
             affectedCellsResolver: resolver,
         });
@@ -190,6 +216,23 @@ describe("floor census core", () => {
                 evidenceManifest: undefined,
             },
         ]);
+    });
+
+    it("fails closed when counted_cells_root is not 32-byte hex", async () => {
+        await expect(
+            buildFloorCensusInputBundle({
+                result: finalizedResultForCensus(),
+                homeCellEvents: [],
+                activeLineages: [],
+                campaignId: `0x${"44".repeat(32)}`,
+                disasterEventId: `0x${"55".repeat(32)}`,
+                membershipRegistryId,
+                cellCountIndexId,
+                censusCheckpoint: 41,
+                countedCellsRoot: "0xcc",
+                issuedAtMs: 1_800_000_001_000,
+            }),
+        ).rejects.toThrow("expected 32-byte hex string");
     });
 
     it("parses Census TEE output into raw submit bytes and counts", () => {
@@ -758,7 +801,8 @@ describe("DirectFloorCensusAdapter", () => {
             verifierRegistry: "0xverifier",
             categoryPool: "0xcategory",
             mainPool: "0xmain",
-            membershipRegistry: "0xmembership",
+            membershipRegistry: membershipRegistryId,
+            cellCountIndex: cellCountIndexId,
             signer: signer.asSigner(),
             reader,
             client,
@@ -787,7 +831,7 @@ describe("DirectFloorCensusAdapter", () => {
         expect(reader.homeCellLookups).toEqual([{ packageId: "0xabc", checkpoint: 41 }]);
         expect(reader.activeLineageLookups).toEqual([
             {
-                membershipRegistryId: "0xmembership",
+                membershipRegistryId,
                 lineages: ["0xlineage"],
                 checkpoint: 41,
             },

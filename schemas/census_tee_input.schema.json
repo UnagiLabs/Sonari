@@ -13,7 +13,10 @@
     "issued_at_ms",
     "campaign_id",
     "disaster_event_id",
+    "membership_registry_id",
+    "cell_count_index_id",
     "census_checkpoint",
+    "counted_cells_root",
     "affected_cells",
     "home_cell_events",
     "active_lineages"
@@ -47,9 +50,21 @@
       "type": "string",
       "pattern": "^0x[0-9a-f]{64}$"
     },
+    "membership_registry_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "cell_count_index_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
     "census_checkpoint": {
       "type": "integer",
       "minimum": 0
+    },
+    "counted_cells_root": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
     },
     "affected_cells": {
       "type": "object"

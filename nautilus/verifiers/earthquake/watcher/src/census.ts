@@ -16,6 +16,8 @@ import {
 const CENSUS_INTENT = "SONARI_FLOOR_CENSUS_V1";
 const CENSUS_VERIFIER_FAMILY = "census";
 const CENSUS_VERIFIER_VERSION = 1n;
+const CENSUS_H3_RESOLUTION = 7;
+const CENSUS_SHARD_COUNT = 4_096n;
 const BAND_COUNT = 3;
 const ED25519_SIGNATURE_BYTES = 64;
 const ED25519_PUBLIC_KEY_BYTES = 32;
@@ -127,7 +129,11 @@ export interface FloorCensusResultFields {
     eventUid: string;
     eventRevision: number;
     affectedCellsRoot: string;
+    membershipRegistryId: string;
+    cellCountIndexId: string;
+    censusCheckpoint: number;
     registeredMembersByBand: readonly [bigint, bigint, bigint];
+    countedCellsRoot: string;
     issuedAtMs: number;
 }
 
@@ -148,7 +154,10 @@ export interface FloorCensusInputBundle {
     issued_at_ms: number;
     campaign_id: string;
     disaster_event_id: string;
+    membership_registry_id: string;
+    cell_count_index_id: string;
     census_checkpoint: number;
+    counted_cells_root: string;
     affected_cells: AffectedCellsArtifact;
     home_cell_events: Array<{
         lineage: string;
@@ -244,6 +253,7 @@ export interface FloorCensusSubmitConfig {
     categoryPool: string;
     mainPool: string;
     membershipRegistry: string;
+    cellCountIndex: string;
     network?: SuiNetwork | undefined;
     grpcUrl?: string | undefined;
     signer?: RelayerSigner | undefined;
@@ -326,7 +336,13 @@ export function encodeFloorCensusResultBcs(input: FloorCensusResultFields): Uint
         hexBytes32(input.eventUid),
         u32(input.eventRevision),
         hexBytes32(input.affectedCellsRoot),
+        hexBytes32(input.membershipRegistryId),
+        hexBytes32(input.cellCountIndexId),
+        u64(BigInt(input.censusCheckpoint)),
+        Uint8Array.of(CENSUS_H3_RESOLUTION),
+        u64(CENSUS_SHARD_COUNT),
         u64Vector(input.registeredMembersByBand),
+        hexBytes32(input.countedCellsRoot),
         u64(BigInt(input.issuedAtMs)),
     ]);
 }
@@ -360,7 +376,10 @@ export async function buildFloorCensusInputBundle(input: {
     activeLineages: ReadonlySet<string> | readonly string[];
     campaignId: string;
     disasterEventId: string;
+    membershipRegistryId: string;
+    cellCountIndexId: string;
     censusCheckpoint: number;
+    countedCellsRoot: string;
     issuedAtMs: number;
     affectedCellsResolver?: FloorCensusAffectedCellsResolver | undefined;
 }): Promise<FloorCensusInputBundle> {
@@ -370,6 +389,9 @@ export async function buildFloorCensusInputBundle(input: {
     }
     validateObjectId(input.campaignId, "campaign_id");
     validateObjectId(input.disasterEventId, "disaster_event_id");
+    validateObjectId(input.membershipRegistryId, "membership_registry_id");
+    validateObjectId(input.cellCountIndexId, "cell_count_index_id");
+    hexBytes32(input.countedCellsRoot);
     validateSafeInteger(input.censusCheckpoint, "census_checkpoint");
     validateSafeInteger(input.issuedAtMs, "issued_at_ms");
 
@@ -394,7 +416,10 @@ export async function buildFloorCensusInputBundle(input: {
         issued_at_ms: input.issuedAtMs,
         campaign_id: input.campaignId,
         disaster_event_id: input.disasterEventId,
+        membership_registry_id: input.membershipRegistryId,
+        cell_count_index_id: input.cellCountIndexId,
         census_checkpoint: input.censusCheckpoint,
+        counted_cells_root: input.countedCellsRoot,
         affected_cells: affectedCells,
         home_cell_events: input.homeCellEvents.map((event) => ({
             lineage: event.lineage,
@@ -522,7 +547,11 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
             eventUid: payload.event_uid,
             eventRevision: payload.event_revision,
             affectedCellsRoot: payload.affected_cells_root,
+            membershipRegistryId: this.config.membershipRegistry,
+            cellCountIndexId: this.config.cellCountIndex,
+            censusCheckpoint: campaign.checkpoint,
             registeredMembersByBand: counts,
+            countedCellsRoot: payload.affected_cells_root,
             issuedAtMs: this.config.now?.() ?? Date.now(),
         });
         const response = await client.signAndExecuteTransaction({
@@ -616,7 +645,10 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
             activeLineages,
             campaignId: campaign.campaignId,
             disasterEventId: input.disasterEventId,
+            membershipRegistryId: this.config.membershipRegistry,
+            cellCountIndexId: this.config.cellCountIndex,
             censusCheckpoint: campaign.checkpoint,
+            countedCellsRoot: payload.affected_cells_root,
             issuedAtMs: this.config.now?.() ?? Date.now(),
         });
         const signed = parseFloorCensusTeeOutput(

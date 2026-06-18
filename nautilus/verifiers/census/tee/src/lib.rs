@@ -24,6 +24,8 @@ pub const VERIFIER_FAMILY_ID: u8 = 5;
 pub const VERIFIER_CONFIG_KEY: u64 = CENSUS_VERIFIER_CONFIG_KEY;
 pub const ATTESTATION_PUBLIC_KEY_LABEL: &[u8] = CENSUS_ATTESTATION_PUBLIC_KEY_LABEL;
 pub const BAND_COUNT: usize = 3;
+pub const H3_RESOLUTION: u8 = 7;
+pub const SHARD_COUNT: u64 = 4_096;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FloorCensusResult {
@@ -33,7 +35,13 @@ pub struct FloorCensusResult {
     pub event_uid: String,
     pub event_revision: u32,
     pub affected_cells_root: String,
+    pub membership_registry_id: String,
+    pub cell_count_index_id: String,
+    pub census_checkpoint: u64,
+    pub h3_resolution: u8,
+    pub shard_count: u64,
     pub registered_members_by_band: Vec<u64>,
+    pub counted_cells_root: String,
     pub issued_at_ms: u64,
 }
 

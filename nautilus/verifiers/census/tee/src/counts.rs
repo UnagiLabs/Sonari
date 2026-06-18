@@ -1,6 +1,6 @@
 use crate::{
-    AffectedCellsArtifact, CensusError, FloorCensusResult, INTENT, VERIFIER_FAMILY,
-    VERIFIER_VERSION, validate_affected_cells_root,
+    AffectedCellsArtifact, CensusError, FloorCensusResult, H3_RESOLUTION, INTENT, SHARD_COUNT,
+    VERIFIER_FAMILY, VERIFIER_VERSION, validate_affected_cells_root,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -14,7 +14,10 @@ pub struct CensusInputBundle {
     pub issued_at_ms: u64,
     pub campaign_id: String,
     pub disaster_event_id: String,
+    pub membership_registry_id: String,
+    pub cell_count_index_id: String,
     pub census_checkpoint: u64,
+    pub counted_cells_root: String,
     pub affected_cells: AffectedCellsArtifact,
     pub home_cell_events: Vec<HomeCellRegisteredEvent>,
     pub active_lineages: Vec<String>,
@@ -70,7 +73,13 @@ pub fn process_floor_census_bundle(
         event_uid: bundle.event_uid.clone(),
         event_revision: bundle.event_revision,
         affected_cells_root: bundle.affected_cells_root.clone(),
+        membership_registry_id: bundle.membership_registry_id.clone(),
+        cell_count_index_id: bundle.cell_count_index_id.clone(),
+        census_checkpoint: bundle.census_checkpoint,
+        h3_resolution: H3_RESOLUTION,
+        shard_count: SHARD_COUNT,
         registered_members_by_band: counts.to_vec(),
+        counted_cells_root: bundle.counted_cells_root.clone(),
         issued_at_ms: bundle.issued_at_ms,
     })
 }
@@ -78,6 +87,9 @@ pub fn process_floor_census_bundle(
 fn validate_census_context(bundle: &CensusInputBundle) -> Result<(), CensusError> {
     validate_object_id(&bundle.campaign_id, "campaign_id")?;
     validate_object_id(&bundle.disaster_event_id, "disaster_event_id")?;
+    validate_object_id(&bundle.membership_registry_id, "membership_registry_id")?;
+    validate_object_id(&bundle.cell_count_index_id, "cell_count_index_id")?;
+    validate_object_id(&bundle.counted_cells_root, "counted_cells_root")?;
     Ok(())
 }
 
@@ -179,8 +191,9 @@ fn parse_canonical_u64_decimal(value: &str, field: &str) -> Result<u64, CensusEr
 mod tests {
     use super::{CensusInputBundle, HomeCellRegisteredEvent};
     use crate::{
-        AffectedCell, AffectedCellsArtifact, INTENT, VERIFIER_FAMILY, VERIFIER_VERSION,
-        compute_affected_cells_root, compute_floor_census_counts, process_floor_census_bundle,
+        AffectedCell, AffectedCellsArtifact, H3_RESOLUTION, INTENT, SHARD_COUNT,
+        VERIFIER_FAMILY, VERIFIER_VERSION, compute_affected_cells_root,
+        compute_floor_census_counts, process_floor_census_bundle,
     };
 
     const EVENT_UID: &str = "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd";
@@ -231,7 +244,10 @@ mod tests {
             issued_at_ms: 1_234,
             campaign_id: format!("0x{}", "55".repeat(32)),
             disaster_event_id: format!("0x{}", "66".repeat(32)),
+            membership_registry_id: format!("0x{}", "22".repeat(32)),
+            cell_count_index_id: format!("0x{}", "33".repeat(32)),
             census_checkpoint: 345,
+            counted_cells_root: format!("0x{}", "cc".repeat(32)),
             affected_cells,
             home_cell_events: Vec::new(),
             active_lineages: vec![
@@ -335,7 +351,13 @@ mod tests {
         assert_eq!(result.event_uid, EVENT_UID);
         assert_eq!(result.event_revision, 7);
         assert_eq!(result.affected_cells_root, bundle.affected_cells_root);
+        assert_eq!(result.membership_registry_id, bundle.membership_registry_id);
+        assert_eq!(result.cell_count_index_id, bundle.cell_count_index_id);
+        assert_eq!(result.census_checkpoint, 345);
+        assert_eq!(result.h3_resolution, H3_RESOLUTION);
+        assert_eq!(result.shard_count, SHARD_COUNT);
         assert_eq!(result.registered_members_by_band, vec![1, 1, 1]);
+        assert_eq!(result.counted_cells_root, bundle.counted_cells_root);
         assert_eq!(result.issued_at_ms, 1_234);
     }
 
@@ -347,6 +369,18 @@ mod tests {
 
         let mut bundle = valid_bundle();
         bundle.disaster_event_id = "0x1234".to_owned();
+        assert!(process_floor_census_bundle(&bundle).is_err());
+
+        let mut bundle = valid_bundle();
+        bundle.membership_registry_id = "0x1234".to_owned();
+        assert!(process_floor_census_bundle(&bundle).is_err());
+
+        let mut bundle = valid_bundle();
+        bundle.cell_count_index_id = "0x1234".to_owned();
+        assert!(process_floor_census_bundle(&bundle).is_err());
+
+        let mut bundle = valid_bundle();
+        bundle.counted_cells_root = "0x1234".to_owned();
         assert!(process_floor_census_bundle(&bundle).is_err());
     }
 }

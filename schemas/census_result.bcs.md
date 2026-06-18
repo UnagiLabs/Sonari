@@ -8,8 +8,8 @@ Relayers, UI code, and external APIs must not reinterpret the payload.
 
 `FloorCensusResult` is the result produced by the Floor Census TEE after
 tallying registered members per affected-cell band for a given disaster event.
-The result covers a single event revision and carries the affected-cells root
-used during counting.
+The result covers a single event revision and carries the affected-cells root,
+the membership count index, and the counted-cells root used during counting.
 
 ## Field order
 
@@ -24,14 +24,26 @@ of the contract.
 | 4 | `event_uid` | 32 raw bytes | Disaster event object id (no BCS length prefix) |
 | 5 | `event_revision` | `u32` | Revision of the disaster event at the time of census |
 | 6 | `affected_cells_root` | 32 raw bytes | Merkle root of affected cells (no BCS length prefix) |
-| 7 | `registered_members_by_band` | `vector<u64>` | ULEB128 length + exactly 3 × `u64` LE; band index matches distance band enum |
-| 8 | `issued_at_ms` | `u64` | Census issue time in milliseconds since Unix epoch |
+| 7 | `membership_registry_id` | 32 raw bytes | Membership registry object id used for the count |
+| 8 | `cell_count_index_id` | 32 raw bytes | CellCountIndex object id used for shard count lookup |
+| 9 | `census_checkpoint` | `u64` | Checkpoint at which cell counts were read |
+| 10 | `h3_resolution` | `u8` | Fixed value `7` |
+| 11 | `shard_count` | `u64` | Fixed value `4096` |
+| 12 | `registered_members_by_band` | `vector<u64>` | ULEB128 length + exactly 3 × `u64` LE; band index matches distance band enum |
+| 13 | `counted_cells_root` | 32 raw bytes | Merkle root of counted cell leaves read by the TEE |
+| 14 | `issued_at_ms` | `u64` | Census issue time in milliseconds since Unix epoch |
 
 ## Notes on raw-byte fields
 
-Fields 4 and 6 are serialised as exactly 32 raw bytes **without** a BCS
+Fields 4, 6, 7, 8, and 13 are serialised as exactly 32 raw bytes **without** a BCS
 `vector<u8>` length prefix. This matches the `peel_bytes32` pattern used
 throughout the Sonari contract suite (see `identity_result_v1.move`).
+
+## Census index invariants
+
+`h3_resolution` must be `7`.
+`shard_count` must be `4096`.
+The Move contract aborts if either value differs.
 
 ## Band count invariant
 

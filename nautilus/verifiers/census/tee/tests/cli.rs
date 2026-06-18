@@ -43,6 +43,19 @@ fn cli_fixture_command_returns_signed_floor_census_result() {
     assert_eq!(result["payload"]["verifier_version"], VERIFIER_VERSION);
     assert_eq!(result["payload"]["event_revision"], 7);
     assert_eq!(
+        result["payload"]["membership_registry_id"],
+        format!("0x{}", "22".repeat(32))
+    );
+    assert_eq!(
+        result["payload"]["cell_count_index_id"],
+        format!("0x{}", "33".repeat(32))
+    );
+    assert_eq!(result["payload"]["census_checkpoint"], 345);
+    assert_eq!(
+        result["payload"]["counted_cells_root"],
+        format!("0x{}", "cc".repeat(32))
+    );
+    assert_eq!(
         result["payload"]["registered_members_by_band"],
         serde_json::json!([1, 1, 0])
     );
@@ -118,7 +131,10 @@ fn valid_bundle_json() -> serde_json::Value {
         "issued_at_ms": 1_234,
         "campaign_id": format!("0x{}", "44".repeat(32)),
         "disaster_event_id": format!("0x{}", "55".repeat(32)),
+        "membership_registry_id": format!("0x{}", "22".repeat(32)),
+        "cell_count_index_id": format!("0x{}", "33".repeat(32)),
         "census_checkpoint": 345,
+        "counted_cells_root": format!("0x{}", "cc".repeat(32)),
         "affected_cells": affected_cells,
         "home_cell_events": [
             {
