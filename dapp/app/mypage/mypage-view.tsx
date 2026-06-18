@@ -60,8 +60,7 @@ export function MypageView({
     // Cancels the most recent in-flight read so a slower earlier request (e.g.
     // from a rapid retry) can never overwrite a newer result.
     const cancelRef = useRef<() => void>(() => {});
-    const identityRegistry =
-        genesisObjects.kind === "ok" ? genesisObjects.identityRegistry : "";
+    const identityRegistry = genesisObjects.kind === "ok" ? genesisObjects.identityRegistry : "";
 
     useEffect(() => {
         if (demo !== undefined || membershipPackageId.length === 0) {

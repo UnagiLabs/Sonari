@@ -180,33 +180,24 @@ describe("resolvePublishedContractIds", () => {
             data:
                 query.MoveEventType === `${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`
                     ? []
-                      : [
-                            genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
-                            genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
-                            genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.membershipRegistry,
-                                MEMBERSHIP_REGISTRY_ID,
-                            ),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.verifierRegistry,
-                                VERIFIER_REGISTRY_ID,
-                            ),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.identityRegistry,
-                                IDENTITY_REGISTRY_ID,
-                            ),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.categoryRegistry,
-                                CATEGORY_REGISTRY_ID,
-                            ),
-                            genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
-                                ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
-                            ),
-                            genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
-                        ],
+                    : [
+                          genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
+                          genesisEvent(
+                              GENESIS_OBJECT_KIND.membershipRegistry,
+                              MEMBERSHIP_REGISTRY_ID,
+                          ),
+                          genesisEvent(GENESIS_OBJECT_KIND.verifierRegistry, VERIFIER_REGISTRY_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.identityRegistry, IDENTITY_REGISTRY_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.categoryRegistry, CATEGORY_REGISTRY_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
+                          genesisEvent(
+                              GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
+                              ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
+                          ),
+                          genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
+                      ],
             hasNextPage: false,
         }));
         await expect(
@@ -222,33 +213,24 @@ describe("resolvePublishedContractIds", () => {
             data:
                 query.MoveEventType === `${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`
                     ? [registryEvent(DISASTER_REGISTRY_ID), registryEvent(objectId("dd"))]
-                      : [
-                            genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
-                            genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
-                            genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.membershipRegistry,
-                                MEMBERSHIP_REGISTRY_ID,
-                            ),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.verifierRegistry,
-                                VERIFIER_REGISTRY_ID,
-                            ),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.identityRegistry,
-                                IDENTITY_REGISTRY_ID,
-                            ),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.categoryRegistry,
-                                CATEGORY_REGISTRY_ID,
-                            ),
-                            genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
-                                ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
-                            ),
-                            genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
-                        ],
+                    : [
+                          genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
+                          genesisEvent(
+                              GENESIS_OBJECT_KIND.membershipRegistry,
+                              MEMBERSHIP_REGISTRY_ID,
+                          ),
+                          genesisEvent(GENESIS_OBJECT_KIND.verifierRegistry, VERIFIER_REGISTRY_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.identityRegistry, IDENTITY_REGISTRY_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.categoryRegistry, CATEGORY_REGISTRY_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
+                          genesisEvent(
+                              GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
+                              ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
+                          ),
+                          genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
+                      ],
             hasNextPage: false,
         }));
         await expect(
@@ -261,30 +243,21 @@ describe("resolvePublishedContractIds", () => {
         vi.mocked(client.queryEvents).mockImplementation(async ({ query }) => ({
             data:
                 query.MoveEventType === `${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`
-                      ? [registryEvent(DISASTER_REGISTRY_ID)]
-                      : [
-                            genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
-                            genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
-                            genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.membershipRegistry,
-                                MEMBERSHIP_REGISTRY_ID,
-                            ),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.verifierRegistry,
-                                VERIFIER_REGISTRY_ID,
-                            ),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.identityRegistry,
-                                IDENTITY_REGISTRY_ID,
-                            ),
-                            genesisEvent(
-                                GENESIS_OBJECT_KIND.categoryRegistry,
-                                CATEGORY_REGISTRY_ID,
-                            ),
-                            genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
-                            genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
-                        ],
+                    ? [registryEvent(DISASTER_REGISTRY_ID)]
+                    : [
+                          genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
+                          genesisEvent(
+                              GENESIS_OBJECT_KIND.membershipRegistry,
+                              MEMBERSHIP_REGISTRY_ID,
+                          ),
+                          genesisEvent(GENESIS_OBJECT_KIND.verifierRegistry, VERIFIER_REGISTRY_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.identityRegistry, IDENTITY_REGISTRY_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.categoryRegistry, CATEGORY_REGISTRY_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
+                          genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
+                      ],
             hasNextPage: false,
         }));
         await expect(

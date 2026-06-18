@@ -101,8 +101,7 @@ export function IdentityStep({
     const client = useCurrentClient();
     const owner = account?.address ?? "";
     const membershipId = lookup.kind === "ok" ? lookup.membershipId : "";
-    const identityRegistry =
-        genesisObjects.kind === "ok" ? genesisObjects.identityRegistry : "";
+    const identityRegistry = genesisObjects.kind === "ok" ? genesisObjects.identityRegistry : "";
     const isSubmitConfigured = submitUrl.length > 0 && identityRegistry.length > 0;
     // owner + membership_id are both required to build a valid submit request;
     // owner non-empty implies a connected wallet, membershipId non-empty implies

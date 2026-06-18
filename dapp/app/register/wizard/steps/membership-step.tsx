@@ -3,11 +3,11 @@
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
-import { createJsonRpcEventClient } from "../../../chain/json-rpc-event-client";
 import {
-    resolveMembershipDappGenesisObjects,
     type MembershipDappGenesisObjects,
+    resolveMembershipDappGenesisObjects,
 } from "../../../chain/genesis-objects";
+import { createJsonRpcEventClient } from "../../../chain/json-rpc-event-client";
 import { LoadingIndicator } from "../../../components/loading-indicator";
 import { dAppKit } from "../../../wallet/dapp-kit";
 import {

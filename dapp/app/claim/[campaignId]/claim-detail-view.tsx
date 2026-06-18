@@ -17,11 +17,11 @@ import { computeIdentityStatementHash } from "@sonari/proof-core";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LoadingIndicator } from "../../components/loading-indicator";
 import {
     type MembershipDappGenesisObjects,
     resolveMembershipDappGenesisObjects,
 } from "../../chain/genesis-objects";
+import { LoadingIndicator } from "../../components/loading-indicator";
 import { SiteTopbar } from "../../i18n/site-topbar";
 import { type MembershipPassData, readMembershipPass } from "../../mypage/membership-pass-read";
 import { MEMBERSHIP_TERMS_VERSION } from "../../register/terms-version";
