@@ -823,7 +823,10 @@ export function DonateView({
             {embedded ? (
                 // embedded（/donate/[eventId]）では分配プレビューと DonorPass ノートを出さず、
                 // フォーム＋送金結果だけの単一カラムにしてシンプルにする。
-                resultPanel
+                // 送金結果は寄付を実行した後（idle 以外）にだけ出す。
+                txState.status !== "idle" ? (
+                    resultPanel
+                ) : null
             ) : (
                 <aside className="donate-side" aria-label={t("split.title")}>
                     <section className="preview-block">

@@ -142,6 +142,11 @@ describe("DonateView initialMode / initialCampaignId / lockDestination props", (
         expect(donateViewSource).toContain("donateForm");
     });
 
+    it("embedded の送金結果は寄付実行後（idle 以外）にだけ出す分岐がある", () => {
+        // idle のとき resultPanel を描かず、寄付実行で txState が idle 以外になってから出す。
+        expect(donateViewSource).toMatch(/txState\.status\s*!==\s*"idle"/u);
+    });
+
     it("auto-select effect で initialCampaignId が指定済みの場合は上書きしない分岐がある", () => {
         // initialCampaignId が与えられたとき auto-select で上書きしないロジック
         expect(donateViewSource).toContain("initialCampaignId");
