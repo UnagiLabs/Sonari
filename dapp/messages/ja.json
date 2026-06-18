@@ -684,7 +684,6 @@
             "title": "確定した情報源",
             "verifiedBadge": "署名検証済み・Finalized",
             "empty": "確定イベントなし",
-            "objectLabel": "disaster_event",
             "revision": "rev {revision} · {date}"
         },
         "sourceChain": {
@@ -708,11 +707,6 @@
             "finalizedAtLabel": "確定日時",
             "claimWindowLabel": "申請期間",
             "claimWindowValue": "確定から30日間"
-        },
-        "affectedMap": {
-            "caption": "affected-area map",
-            "grid": "H3 r8 · {cells} cells",
-            "note": "被災地域は ShakeMap から計算された H3 セルで表され、claim 時の affected-area proof に使用されます。"
         },
         "disclaimer": "Sonari は保険ではありません。寄付は保証された支払いを生みません。支援は Pool 残高、プログラムルール、検証要件、不正対策、申請タイミングに依存します。",
         "states": {

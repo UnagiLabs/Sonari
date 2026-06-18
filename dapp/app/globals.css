@@ -1381,6 +1381,19 @@ h4 {
   line-height: 1;
 }
 
+.event-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.event-title-link:hover,
+.event-title-link:focus-visible {
+  color: var(--sage-700);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 5px;
+}
+
 .event-summary dl {
   display: grid;
   gap: 14px;
@@ -1444,73 +1457,6 @@ h4 {
   color: var(--ink-faint);
   font-family: var(--font-mono);
   font-size: 12px;
-}
-
-/* 確定情報源パネルの本文: 左に詳細、右に被災エリア map プレースホルダ。 */
-.source-layout {
-  display: grid;
-  align-items: start;
-  gap: 28px;
-  grid-template-columns: 1.1fr 0.9fr;
-}
-
-.source-object-link {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  color: var(--sage-800);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.source-object-link:hover {
-  color: var(--sage-600);
-}
-
-.source-map {
-  display: grid;
-  gap: 12px;
-}
-
-.affected-map-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  aspect-ratio: 4 / 3;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: repeating-linear-gradient(
-    135deg,
-    var(--sage-50),
-    var(--sage-50) 10px,
-    var(--surface) 10px,
-    var(--surface) 20px
-  );
-}
-
-.affected-map-caption {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  padding: 12px 18px;
-  border-radius: var(--radius-md);
-  background: oklch(1 0 0 / 0.7);
-  color: var(--ink-muted);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  text-align: center;
-}
-
-.affected-map-note {
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-@media (max-width: 720px) {
-  .source-layout {
-    grid-template-columns: 1fr;
-  }
 }
 
 .activity-list {

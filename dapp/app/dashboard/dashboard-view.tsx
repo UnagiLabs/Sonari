@@ -365,54 +365,41 @@ function ConfirmedSourcePanel({ source }: { readonly source: DashboardConfirmedS
                 ) : null}
             </div>
 
-            <div className="source-layout">
-                <div className="event-summary">
+            <div className="event-summary">
+                {source.present ? <div className="event-source">{source.sourceEventId}</div> : null}
+                <h3>
                     {source.present ? (
-                        <div className="event-source">{source.sourceEventId}</div>
-                    ) : null}
-                    <h3>{source.present ? source.region : t("confirmedSource.empty")}</h3>
-                    <dl>
-                        <div>
-                            <dt>{t("eventPanel.hazardLabel")}</dt>
-                            <dd>{source.present ? source.hazard : "—"}</dd>
-                        </div>
-                        <div>
-                            <dt>{t("eventPanel.affectedCellsLabel")}</dt>
-                            <dd>
-                                {source.present
-                                    ? t("eventPanel.affectedCellsValue", {
-                                          cells: source.affectedCellsCount,
-                                      })
-                                    : "—"}
-                            </dd>
-                        </div>
-                        <div>
-                            <dt>{t("eventPanel.finalizedAtLabel")}</dt>
-                            <dd>{source.present ? source.finalizedAt : "—"}</dd>
-                        </div>
-                        <div>
-                            <dt>{t("eventPanel.claimWindowLabel")}</dt>
-                            <dd>{source.present ? t("eventPanel.claimWindowValue") : "—"}</dd>
-                        </div>
-                    </dl>
-                    {source.present ? (
-                        <a className="source-object-link" href="/events">
-                            {t("confirmedSource.objectLabel")} {source.objectIdShort} →
+                        <a className="event-title-link" href={source.donateHref}>
+                            {source.region}
                         </a>
-                    ) : null}
-                </div>
-
-                <div className="source-map">
-                    <div className="affected-map-placeholder" aria-hidden="true">
-                        <div className="affected-map-caption">
-                            <span>{t("affectedMap.caption")}</span>
-                            <span>
-                                {t("affectedMap.grid", { cells: source.affectedCellsCount })}
-                            </span>
-                        </div>
+                    ) : (
+                        t("confirmedSource.empty")
+                    )}
+                </h3>
+                <dl>
+                    <div>
+                        <dt>{t("eventPanel.hazardLabel")}</dt>
+                        <dd>{source.present ? source.hazard : "—"}</dd>
                     </div>
-                    <p className="muted affected-map-note">{t("affectedMap.note")}</p>
-                </div>
+                    <div>
+                        <dt>{t("eventPanel.affectedCellsLabel")}</dt>
+                        <dd>
+                            {source.present
+                                ? t("eventPanel.affectedCellsValue", {
+                                      cells: source.affectedCellsCount,
+                                  })
+                                : "—"}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt>{t("eventPanel.finalizedAtLabel")}</dt>
+                        <dd>{source.present ? source.finalizedAt : "—"}</dd>
+                    </div>
+                    <div>
+                        <dt>{t("eventPanel.claimWindowLabel")}</dt>
+                        <dd>{source.present ? t("eventPanel.claimWindowValue") : "—"}</dd>
+                    </div>
+                </dl>
             </div>
         </section>
     );
