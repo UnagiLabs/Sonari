@@ -536,6 +536,10 @@
             "delivered": "{amount} delivered",
             "available": "available balance",
             "statusActive": "active",
+            "balance": "Pool balance",
+            "affectedCells": "Affected cells",
+            "empty": "No active disaster relief pools at this time.",
+            "error": "Could not load disaster relief pools.",
             "main": {
                 "name": "Main Pool",
                 "description": "General relief reserves across active programs.",

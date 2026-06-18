@@ -536,6 +536,10 @@
             "delivered": "{amount} 送付",
             "available": "利用可能な残高",
             "statusActive": "稼働中",
+            "balance": "プール残高",
+            "affectedCells": "被災セル数",
+            "empty": "現在アクティブな災害救援プールはありません。",
+            "error": "災害特設救援プールを読み込めませんでした。",
             "main": {
                 "name": "メインプール",
                 "description": "稼働中の各プログラムを横断する一般救援の準備金。",

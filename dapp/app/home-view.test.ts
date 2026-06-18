@@ -103,6 +103,20 @@ describe("home view sponsor logos", () => {
 // モックのプール金額。実残高化で home-view.tsx から消えること。
 const removedPoolMockTokens = ["$1.28M", "$2.10M", "$820K", "$642K", "$980K", "$337K"] as const;
 
+// 旧実装（Main/Earthquake 固定プール）のトークン。差し替え後は消えること。
+const removedOldFeaturedPoolsTokens = [
+    "deriveFeaturedPools",
+    "readDashboardPools",
+    "FEATURED_POOLS",
+    "readGenesisObjectIds",
+    "selectGenesisObjectId",
+    "GENESIS_OBJECT_KIND",
+    "mainPoolId",
+    "operationsPoolId",
+    "categoryPoolId",
+    "DashboardPoolSummary",
+] as const;
+
 describe("home view featured pools", () => {
     it("モックのプール金額を残さない", () => {
         for (const token of removedPoolMockTokens) {
@@ -110,9 +124,29 @@ describe("home view featured pools", () => {
         }
     });
 
-    it("実データ取得（deriveFeaturedPools / readDashboardPools）を使う", () => {
-        expect(homeViewSource).toContain("deriveFeaturedPools");
-        expect(homeViewSource).toContain("readDashboardPools");
+    it("旧 Main/Earthquake 固定プール実装を残さない", () => {
+        for (const token of removedOldFeaturedPoolsTokens) {
+            expect(homeViewSource, token).not.toContain(token);
+        }
+    });
+
+    it("実データ取得（readClaimCampaigns / buildDisasterPoolViews）を使う", () => {
+        expect(homeViewSource).toContain("readClaimCampaigns");
+        expect(homeViewSource).toContain("buildDisasterPoolViews");
+    });
+
+    it("カード href が /donate/ を含む", () => {
+        expect(homeViewSource).toContain("/donate/");
+    });
+
+    it("最新 3 件に絞る（slice(0, 3) または .slice(0, 3) トークン）", () => {
+        expect(homeViewSource).toContain(".slice(0, 3)");
+    });
+
+    it("0 件文言キー（pools.empty）を参照する", () => {
+        // pools namespace の empty キーを再利用する
+        expect(homeViewSource).toContain('"pools"');
+        expect(homeViewSource).toContain('"empty"');
     });
 
     it("読み込み中と失敗の状態を持つ（fail-close）", () => {
@@ -120,8 +154,8 @@ describe("home view featured pools", () => {
         expect(homeViewSource).toContain('status: "error"');
     });
 
-    it("メインプール画像を新パスに差し替え、旧パスを残さない", () => {
-        expect(homeViewSource).toContain("/assets/pool_main_support.jpg");
+    it("メインプール画像パスを残さない（災害プール画像を流用）", () => {
+        expect(homeViewSource).not.toContain("/assets/pool_main_support.jpg");
         expect(homeViewSource).not.toContain("/assets/donation_flood.webp");
     });
 });
