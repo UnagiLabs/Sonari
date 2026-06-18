@@ -881,6 +881,27 @@
             "donate": "このプールに寄付する"
         }
     },
+    "disasterDonate": {
+        "title": "災害特設救援プールへ寄付する",
+        "notFoundTitle": "災害プールが見つかりません",
+        "notFoundBody": "指定されたイベントに対応する災害特設救援プールが見つかりませんでした。削除されたか、リンクが正しくない可能性があります。",
+        "backToPools": "災害特設救援プール一覧に戻る",
+        "mapTitle": "被災エリア",
+        "regionLabel": "地域",
+        "affectedCellsLabel": "被影響セル数",
+        "donationEndLabel": "寄付受付締切",
+        "claimEndLabel": "申請受付締切",
+        "balanceLabel": "プール残高",
+        "totalDonatedLabel": "累計受入額",
+        "totalPaidLabel": "累計支払額",
+        "statusLabel": "ステータス",
+        "status": {
+            "active": "受付中",
+            "ended": "寄付終了",
+            "paused": "一時停止",
+            "closed": "クローズ"
+        }
+    },
     "notFound": {
         "brandHomeAria": "Sonari ホームへ戻る",
         "eyebrow": "404 / ページが見つかりません",

@@ -881,6 +881,27 @@
             "donate": "Donate to this pool"
         }
     },
+    "disasterDonate": {
+        "title": "Donate to disaster relief pool",
+        "notFoundTitle": "Disaster pool not found",
+        "notFoundBody": "No disaster relief pool was found for the specified event. It may have been removed or the link may be incorrect.",
+        "backToPools": "Back to disaster relief pools",
+        "mapTitle": "Affected area",
+        "regionLabel": "Region",
+        "affectedCellsLabel": "Affected cells",
+        "donationEndLabel": "Donation deadline",
+        "claimEndLabel": "Claim deadline",
+        "balanceLabel": "Pool balance",
+        "totalDonatedLabel": "Total donated",
+        "totalPaidLabel": "Total paid out",
+        "statusLabel": "Status",
+        "status": {
+            "active": "Active",
+            "ended": "Donation ended",
+            "paused": "Paused",
+            "closed": "Closed"
+        }
+    },
     "notFound": {
         "brandHomeAria": "Go to Sonari home",
         "eyebrow": "404 / Page not found",
