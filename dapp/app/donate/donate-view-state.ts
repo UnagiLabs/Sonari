@@ -284,33 +284,6 @@ export function isDonateSubmitDisabled(input: {
     return input.demoMode || input.disabledReason !== null || input.isInFlight;
 }
 
-export function findActiveEmergencyCampaign(
-    campaigns: readonly CampaignDestination[],
-    nowMs: bigint,
-): CampaignDestination | null {
-    for (const campaign of campaigns) {
-        if (BigInt(campaign.donationEndMs) > nowMs) {
-            return campaign;
-        }
-    }
-    return null;
-}
-
-/**
- * DonateDestinationReadState と現在時刻から、緊急バナーに表示するキャンペーンを選定する。
- * status が "ready" 以外の場合（loading / error / idle）は null を返してバナーを非表示にする。
- * status が "ready" の場合は findActiveEmergencyCampaign に委譲する。
- */
-export function selectEmergencyBannerCampaign(
-    state: DonateDestinationReadState,
-    nowMs: bigint,
-): CampaignDestination | null {
-    if (state.status !== "ready") {
-        return null;
-    }
-    return findActiveEmergencyCampaign(state.campaigns, nowMs);
-}
-
 /**
  * 災害 Campaign 一覧（DisasterEvent 紐付け済み）から緊急バナー用の情報を選ぶ。
  * 寄付受付中（donationEndMs > now）の先頭を 1 件選び、表示名には災害イベント名

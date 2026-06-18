@@ -7,7 +7,7 @@
  * 可否（Merkle proof が必要な重い判定）はここでは扱わず、最終判定は Claim 画面に
  * 委ねる。バナーは「受け取れるかもしれない」入口に留める。
  *
- * 寄付バナーの判定（selectEmergencyBannerCampaign）とは責務を分け、ここに混ぜない。
+ * 寄付バナーの判定（selectEmergencyBannerFromClaimCampaigns）とは責務を分け、ここに混ぜない。
  */
 
 import type { ClaimCampaignState } from "./claim/claim-campaigns";
