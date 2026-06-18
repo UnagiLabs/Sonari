@@ -11,9 +11,11 @@ pub const CENSUS_GRAPHQL_NETWORK_KEY: &str = "SONARI_CENSUS_SUI_NETWORK";
 pub const CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY: &str = "SONARI_CENSUS_GRAPHQL_EGRESS_PROXY_URL";
 
 const GRAPHQL_REQUEST_TIMEOUT_MS: u64 = 10_000;
-const DEFAULT_CELL_COUNT_BATCH_SIZE: usize = 100;
-const CHECKPOINT_PAGE_SIZE: u64 = 100;
-const EVENT_PAGE_SIZE: u64 = 100;
+// Sui GraphQL enforces maxPageSize / maxMultiGetSize = 50 for connection pages
+// and multi-get key batches. Larger values fail with "Page size is too large".
+const DEFAULT_CELL_COUNT_BATCH_SIZE: usize = 50;
+const CHECKPOINT_PAGE_SIZE: u64 = 50;
+const EVENT_PAGE_SIZE: u64 = 50;
 const MAX_GRAPHQL_PAGES: usize = 512;
 const DEFAULT_SHARD_CONCURRENCY_LIMIT: usize = 8;
 const DEFAULT_GRAPHQL_MAX_ATTEMPTS: u32 = 4;
@@ -22,7 +24,7 @@ query SonariCensusLatestCheckpoints($last: Int!, $before: String) {
   checkpoints(last: $last, before: $before) {
     nodes {
       sequenceNumber
-      timestampMs
+      timestamp
     }
     pageInfo {
       hasPreviousPage
@@ -525,7 +527,12 @@ pub fn parse_latest_checkpoint_at_or_before(
     for node in nodes {
         let sequence_number =
             read_u64_path(node, &["sequenceNumber"], "checkpoint sequenceNumber")?;
-        let timestamp_ms = read_u64_path(node, &["timestampMs"], "checkpoint timestampMs")?;
+        // Sui GraphQL exposes the checkpoint time as the `DateTime` scalar
+        // (RFC3339 UTC, e.g. `2024-01-01T07:10:09.476Z`), not a millisecond integer.
+        let timestamp_ms = parse_rfc3339_utc_ms(
+            read_string_path(node, &["timestamp"], "checkpoint timestamp")?,
+            "checkpoint timestamp",
+        )?;
         if timestamp_ms <= occurred_at_ms
             && latest.is_none_or(|previous| previous < sequence_number)
         {
@@ -548,11 +555,12 @@ pub fn parse_cell_count_index_metadata(
     validate_object_id(expected_membership_registry_id, "membership_registry_id")?;
     let mut candidate: Option<CellCountIndexMetadata> = None;
     for event_json in graphql_event_json_nodes(response)? {
-        let package_id = read_object_id_field(event_json, "package_id")?;
+        // Package scope is already enforced by the
+        // `<package_id>::cell_count_index::CellCountIndexPublished` event type filter, so the
+        // event body's `package_id` is not used to match (the contract currently emits the zero
+        // address there). The CellCountIndex is matched to the expected membership registry.
         let membership_registry_id = read_object_id_field(event_json, "membership_registry_id")?;
-        if !same_object_id(&package_id, expected_package_id)
-            || !same_object_id(&membership_registry_id, expected_membership_registry_id)
-        {
+        if !same_object_id(&membership_registry_id, expected_membership_registry_id) {
             continue;
         }
         let metadata = CellCountIndexMetadata {
@@ -591,11 +599,12 @@ pub fn parse_cell_count_shard_object_ids(
     validate_object_id(expected_cell_count_index_id, "cell_count_index_id")?;
     let mut shards = HashMap::new();
     for event_json in graphql_event_json_nodes(response)? {
-        let package_id = read_object_id_field(event_json, "package_id")?;
+        // Package scope is enforced by the
+        // `<package_id>::cell_count_index::CellCountShardPublished` event type filter; the event
+        // body's `package_id` (currently the zero address) is not used. Shards are matched to the
+        // resolved CellCountIndex object id.
         let cell_count_index_id = read_object_id_field(event_json, "cell_count_index_id")?;
-        if !same_object_id(&package_id, expected_package_id)
-            || !same_object_id(&cell_count_index_id, expected_cell_count_index_id)
-        {
+        if !same_object_id(&cell_count_index_id, expected_cell_count_index_id) {
             continue;
         }
         let shard_id = read_u64_field(event_json, "shard_id")?;
@@ -770,6 +779,108 @@ fn read_u64_path(value: &Value, path: &[&str], field: &str) -> Result<u64, Censu
     read_u64_value(read_path(value, path, field)?, field)
 }
 
+fn read_string_path<'a>(
+    value: &'a Value,
+    path: &[&str],
+    field: &str,
+) -> Result<&'a str, CensusError> {
+    read_path(value, path, field)?
+        .as_str()
+        .ok_or_else(|| CensusError::InvalidPayload(format!("{field} is missing or malformed")))
+}
+
+fn rfc3339_error(field: &str) -> CensusError {
+    CensusError::InvalidPayload(format!("{field} must be an RFC3339 UTC timestamp"))
+}
+
+fn parse_rfc3339_component(value: Option<&str>, field: &str) -> Result<u64, CensusError> {
+    let value = value.ok_or_else(|| rfc3339_error(field))?;
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(rfc3339_error(field));
+    }
+    value.parse::<u64>().map_err(|_| rfc3339_error(field))
+}
+
+// Days since the Unix epoch for a proleptic Gregorian date (Howard Hinnant's
+// `days_from_civil`). Deterministic and dependency-free.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// Converts an RFC3339 UTC timestamp emitted by the Sui GraphQL `DateTime`
+/// scalar (e.g. `2024-01-01T07:10:09.476Z` or `2023-05-10T15:00:00Z`) into Unix
+/// milliseconds. Only the UTC `Z` form is accepted; anything else fails closed.
+fn parse_rfc3339_utc_ms(value: &str, field: &str) -> Result<u64, CensusError> {
+    let body = value
+        .strip_suffix('Z')
+        .ok_or_else(|| rfc3339_error(field))?;
+    let (date_part, time_part) = body.split_once('T').ok_or_else(|| rfc3339_error(field))?;
+
+    let mut date = date_part.split('-');
+    let year = parse_rfc3339_component(date.next(), field)?;
+    let month = parse_rfc3339_component(date.next(), field)?;
+    let day = parse_rfc3339_component(date.next(), field)?;
+    if date.next().is_some() {
+        return Err(rfc3339_error(field));
+    }
+
+    let (clock_part, fraction_part) = match time_part.split_once('.') {
+        Some((clock, fraction)) => (clock, Some(fraction)),
+        None => (time_part, None),
+    };
+    let mut clock = clock_part.split(':');
+    let hour = parse_rfc3339_component(clock.next(), field)?;
+    let minute = parse_rfc3339_component(clock.next(), field)?;
+    let second = parse_rfc3339_component(clock.next(), field)?;
+    if clock.next().is_some() {
+        return Err(rfc3339_error(field));
+    }
+
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return Err(rfc3339_error(field));
+    }
+
+    let fraction_ms = match fraction_part {
+        None => 0,
+        Some(fraction) => {
+            if fraction.is_empty() || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(rfc3339_error(field));
+            }
+            // Normalize to exactly three digits of milliseconds.
+            let mut normalized = 0u64;
+            for index in 0..3 {
+                let digit = fraction
+                    .as_bytes()
+                    .get(index)
+                    .map_or(0, |byte| u64::from(byte - b'0'));
+                normalized = normalized * 10 + digit;
+            }
+            normalized
+        }
+    };
+
+    let days = days_from_civil(year as i64, month as i64, day as i64);
+    let seconds = days
+        .checked_mul(86_400)
+        .and_then(|base| base.checked_add((hour * 3_600 + minute * 60 + second) as i64))
+        .ok_or_else(|| rfc3339_error(field))?;
+    let millis = seconds
+        .checked_mul(1_000)
+        .and_then(|base| base.checked_add(fraction_ms as i64))
+        .ok_or_else(|| rfc3339_error(field))?;
+    u64::try_from(millis).map_err(|_| rfc3339_error(field))
+}
+
 fn read_u64_field(value: &Value, field: &str) -> Result<u64, CensusError> {
     read_u64_value(
         value
@@ -856,8 +967,8 @@ mod tests {
         event_response_from_nodes, graphql_event_nodes, group_affected_cells_by_shard,
         h3_cell_dynamic_field_key, parse_cell_count_index_metadata,
         parse_cell_count_shard_object_ids, parse_latest_checkpoint_at_or_before,
-        parse_shard_count_response, read_checkpoint_page_info, read_event_page_info,
-        shard_count_batches, shard_count_query_variables,
+        parse_rfc3339_utc_ms, parse_shard_count_response, read_checkpoint_page_info,
+        read_event_page_info, shard_count_batches, shard_count_query_variables,
     };
     use crate::AffectedCell;
     use sonari_tee_core::TeeContext;
@@ -932,9 +1043,9 @@ mod tests {
             "data": {
                 "checkpoints": {
                     "nodes": [
-                        { "sequenceNumber": "40", "timestampMs": "900" },
-                        { "sequenceNumber": "41", "timestampMs": "1000" },
-                        { "sequenceNumber": "42", "timestampMs": "1001" }
+                        { "sequenceNumber": "40", "timestamp": "1970-01-01T00:00:00.900Z" },
+                        { "sequenceNumber": "41", "timestamp": "1970-01-01T00:00:01Z" },
+                        { "sequenceNumber": "42", "timestamp": "1970-01-01T00:00:01.001Z" }
                     ]
                 }
             }
@@ -949,7 +1060,7 @@ mod tests {
     #[test]
     fn checkpoint_parser_rejects_when_no_checkpoint_is_old_enough() {
         let response = serde_json::json!({
-            "data": { "checkpoints": { "nodes": [{ "sequenceNumber": 1, "timestampMs": 10 }] } }
+            "data": { "checkpoints": { "nodes": [{ "sequenceNumber": 1, "timestamp": "1970-01-01T00:00:00.010Z" }] } }
         });
 
         let error = parse_latest_checkpoint_at_or_before(&response, 9).unwrap_err();
@@ -963,8 +1074,8 @@ mod tests {
             "data": {
                 "checkpoints": {
                     "nodes": [
-                        { "sequenceNumber": "90", "timestampMs": "2000" },
-                        { "sequenceNumber": "91", "timestampMs": "2010" }
+                        { "sequenceNumber": "90", "timestamp": "1970-01-01T00:00:02Z" },
+                        { "sequenceNumber": "91", "timestamp": "1970-01-01T00:00:02.010Z" }
                     ],
                     "pageInfo": {
                         "hasPreviousPage": true,
@@ -983,10 +1094,49 @@ mod tests {
         assert_eq!(
             checkpoint_page_variables(Some(&page_info.start_cursor)),
             serde_json::json!({
-                "last": 100,
+                "last": 50,
                 "before": "checkpoint-cursor-90"
             }),
         );
+    }
+
+    #[test]
+    fn rfc3339_parser_converts_sui_datetime_to_unix_ms() {
+        // Sui GraphQL DateTime forms, with and without fractional seconds.
+        assert_eq!(
+            parse_rfc3339_utc_ms("1970-01-01T00:00:00Z", "ts").unwrap(),
+            0
+        );
+        assert_eq!(
+            parse_rfc3339_utc_ms("1970-01-01T00:00:01.001Z", "ts").unwrap(),
+            1_001
+        );
+        // The literal Noto Peninsula 2024 occurred_at_ms (us6000m0xl).
+        assert_eq!(
+            parse_rfc3339_utc_ms("2024-01-01T07:10:09.476Z", "ts").unwrap(),
+            1_704_093_009_476
+        );
+        // Genesis checkpoint timestamp observed on testnet.
+        assert_eq!(
+            parse_rfc3339_utc_ms("2023-05-10T15:00:00Z", "ts").unwrap(),
+            1_683_730_800_000
+        );
+    }
+
+    #[test]
+    fn rfc3339_parser_rejects_non_utc_and_malformed_input() {
+        for malformed in [
+            "2024-01-01T07:10:09.476+09:00",
+            "2024-01-01 07:10:09Z",
+            "2024-13-01T00:00:00Z",
+            "not-a-timestamp",
+            "",
+        ] {
+            assert!(
+                parse_rfc3339_utc_ms(malformed, "ts").is_err(),
+                "expected `{malformed}` to be rejected"
+            );
+        }
     }
 
     #[test]
@@ -999,14 +1149,14 @@ mod tests {
                 "events": {
                     "nodes": [
                         { "contents": { "json": {
-                            "package_id": object_id("ff"),
-                            "membership_registry_id": membership_registry_id,
+                            "package_id": object_id("00"),
+                            "membership_registry_id": object_id("99"),
                             "cell_count_index_id": object_id("44"),
                             "h3_resolution": 7,
                             "shard_count": "4096"
                         }}},
                         { "contents": { "json": {
-                            "package_id": package_id,
+                            "package_id": object_id("00"),
                             "membership_registry_id": membership_registry_id,
                             "cell_count_index_id": index_id,
                             "h3_resolution": 7,
