@@ -151,6 +151,26 @@ fn live_judges_zero_for_noto_cells_without_members() {
     }
 }
 
+/// Proves binary-search checkpoint resolution reaches a multi-hour-old occurrence
+/// time. Linear backward pagination could only reach ~25k checkpoints (~2-3h) behind
+/// the tip; binary search resolves any retained checkpoint in O(log N) point lookups.
+#[test]
+#[ignore = "hits live Sui testnet GraphQL"]
+fn live_binary_search_resolves_multi_hour_old_occurrence() {
+    let occurred_at_ms = now_ms() - 4 * 3_600_000; // ~4 hours behind the chain tip
+    let member_cell = env_or("SONARI_MEMBER_CELL", DEFAULT_MEMBER_CELL);
+    let snapshot = client()
+        .resolve_counted_cells(&bundle(occurred_at_ms, vec![(member_cell.as_str(), 1)]))
+        .expect("binary search should resolve a multi-hour-old occurrence time");
+
+    eprintln!(
+        "occurred {}ms ago resolved census_checkpoint = {}",
+        4 * 3_600_000,
+        snapshot.census_checkpoint
+    );
+    assert!(snapshot.census_checkpoint > 0);
+}
+
 /// Observes the behavior for the *literal* historical Noto timestamp
 /// (2024-01-01). The Census TEE resolves `census_checkpoint` as the latest
 /// checkpoint at or before `occurred_at_ms`; for a 2.5-year-old event this
