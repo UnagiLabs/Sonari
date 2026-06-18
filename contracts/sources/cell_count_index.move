@@ -11,6 +11,7 @@ const EShardIndexMismatch: u64 = 0;
 const EShardIdMismatch: u64 = 1;
 const ECellCountMissing: u64 = 2;
 const ECellCountUnderflow: u64 = 3;
+const EMembershipRegistryMismatch: u64 = 4;
 
 public struct CellCountIndex has key {
     id: UID,
@@ -113,6 +114,10 @@ public(package) fun increment_or_create(
         dynamic_field::add(&mut shard.id, h3_cell, CellCount { active_count: 1 });
         1
     }
+}
+
+public(package) fun assert_membership_registry_id(index: &CellCountIndex, registry_id: ID) {
+    assert!(index.membership_registry_id == registry_id, EMembershipRegistryMismatch);
 }
 
 public(package) fun decrement_existing(index: &mut CellCountIndex, h3_cell: u64): u64 {

@@ -5,6 +5,7 @@ use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
 use contracts::allowed_residence_cell;
 use contracts::campaign as campaign_v2;
 use contracts::category_pool::{Self, CategoryPool, CategoryRegistry};
+use contracts::cell_count_index;
 use contracts::census_result;
 use contracts::disaster_event::{Self, DisasterEvent, DisasterRegistry};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
@@ -40,6 +41,7 @@ public fun transfer_donor_pass(pass: DonorPass, ctx: &mut TxContext) {
 public fun register_member(
     pause_state: &PauseState,
     registry: &mut membership::MembershipRegistry,
+    count_index: &mut cell_count_index::CellCountIndex,
     residence_registry: &allowed_residence_cell::AllowedResidenceCellRegistry,
     home_cell: u64,
     proof: vector<allowed_residence_cell::ProofStep>,
@@ -55,6 +57,7 @@ public fun register_member(
     );
     membership::register_member(
         registry,
+        count_index,
         home_cell,
         terms_version,
         signed_statement_hash,

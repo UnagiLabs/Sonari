@@ -4,6 +4,7 @@ module contracts::membership_tests;
 use contracts::accessor;
 use contracts::admin;
 use contracts::allowed_residence_cell;
+use contracts::cell_count_index;
 use contracts::membership;
 use contracts::pools;
 use contracts::reader;
@@ -30,6 +31,7 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let mut count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
         let residence_registry =
             scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
         let registry_id = membership::registry_id(&registry);
@@ -37,6 +39,7 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
         accessor::register_member(
             &pause_state,
             &mut registry,
+            &mut count_index,
             &residence_registry,
             HOME_CELL,
             target_proof(),
@@ -64,6 +67,7 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
+        test_scenario::return_shared(count_index);
         test_scenario::return_shared(residence_registry);
 
         scenario.next_tx(MEMBER);
@@ -102,6 +106,7 @@ fun member_registration_does_not_deposit_to_operations_pool() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let main_pool = scenario.take_shared<pools::MainPool>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let mut count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
         let residence_registry =
             scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
         let operations_pool = scenario.take_shared<pools::OperationsPool>();
@@ -109,6 +114,7 @@ fun member_registration_does_not_deposit_to_operations_pool() {
         accessor::register_member(
             &pause_state,
             &mut registry,
+            &mut count_index,
             &residence_registry,
             HOME_CELL,
             target_proof(),
@@ -125,6 +131,7 @@ fun member_registration_does_not_deposit_to_operations_pool() {
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(main_pool);
         test_scenario::return_shared(registry);
+        test_scenario::return_shared(count_index);
         test_scenario::return_shared(residence_registry);
         test_scenario::return_shared(operations_pool);
     };
@@ -136,6 +143,40 @@ fun member_registration_does_not_deposit_to_operations_pool() {
 fun valid_residence_proof_allows_initial_registration() {
     let mut scenario = initialized_with_pools();
     register_member(&mut scenario);
+    scenario.end();
+}
+
+#[test]
+fun first_registration_increments_home_cell_count_and_creates_shard() {
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
+        let shard_id = cell_count_index::shard_id_for_testing(HOME_CELL);
+        assert!(cell_count_index::has_shard_for_testing(&count_index, shard_id));
+        assert!(cell_count_index::has_cell_for_testing(&count_index, HOME_CELL));
+        assert!(cell_count_index::read_count_or_zero(&count_index, HOME_CELL) == 1);
+        test_scenario::return_shared(count_index);
+    };
+
+    scenario.end();
+}
+
+#[test]
+fun second_member_in_same_home_cell_increments_existing_count() {
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario);
+    register_member_with_proof(&mut scenario, OTHER, HOME_CELL, target_proof());
+
+    scenario.next_tx(ADMIN);
+    {
+        let count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
+        assert!(cell_count_index::read_count_or_zero(&count_index, HOME_CELL) == 2);
+        test_scenario::return_shared(count_index);
+    };
+
     scenario.end();
 }
 
@@ -403,6 +444,45 @@ fun duplicate_member_registration_for_same_owner_is_rejected() {
     scenario.end();
 }
 
+#[test, expected_failure(abort_code = cell_count_index::EMembershipRegistryMismatch)]
+fun member_registration_rejects_mismatched_cell_count_index() {
+    let mut scenario = initialized_with_pools();
+    let wrong_registry_id = operations_pool_id(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    let wrong_index_id =
+        cell_count_index::create_index_for_testing(wrong_registry_id, scenario.ctx());
+
+    scenario.next_tx(MEMBER);
+    {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let mut wrong_count_index =
+            scenario.take_shared_by_id<cell_count_index::CellCountIndex>(wrong_index_id);
+        let residence_registry =
+            scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+
+        accessor::register_member(
+            &pause_state,
+            &mut registry,
+            &mut wrong_count_index,
+            &residence_registry,
+            HOME_CELL,
+            target_proof(),
+            TERMS_VERSION,
+            SIGNED_STATEMENT_HASH,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+        test_scenario::return_shared(wrong_count_index);
+        test_scenario::return_shared(residence_registry);
+    };
+
+    scenario.end();
+}
+
 #[test]
 fun registry_current_pass_precheck_matches_pass_and_owner_index() {
     let mut scenario = initialized_with_pools();
@@ -610,12 +690,14 @@ fun register_member_emits_home_cell_registered_event() {
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let mut count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
         let residence_registry =
             scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
 
         accessor::register_member(
             &pause_state,
             &mut registry,
+            &mut count_index,
             &residence_registry,
             HOME_CELL,
             target_proof(),
@@ -634,6 +716,7 @@ fun register_member_emits_home_cell_registered_event() {
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
+        test_scenario::return_shared(count_index);
         test_scenario::return_shared(residence_registry);
 
         scenario.next_tx(MEMBER);
@@ -732,12 +815,14 @@ fun register_member_with_proof(
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let mut count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
         let residence_registry =
             scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
 
         accessor::register_member(
             &pause_state,
             &mut registry,
+            &mut count_index,
             &residence_registry,
             home_cell,
             proof,
@@ -748,6 +833,7 @@ fun register_member_with_proof(
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
+        test_scenario::return_shared(count_index);
         test_scenario::return_shared(residence_registry);
     };
 }

@@ -1,5 +1,6 @@
 module contracts::membership;
 
+use contracts::cell_count_index;
 use std::string::{Self, String};
 use sui::dynamic_field;
 use sui::event;
@@ -71,6 +72,7 @@ public struct HomeCellRegistered has copy, drop {
 
 public(package) fun register_member(
     registry: &mut MembershipRegistry,
+    count_index: &mut cell_count_index::CellCountIndex,
     home_cell: u64,
     terms_version: u64,
     signed_statement_hash: vector<u8>,
@@ -112,6 +114,8 @@ public(package) fun register_member(
     dynamic_field::add(&mut registry.id, ctx.sender(), pass_lineage_id);
     dynamic_field::add(&mut registry.id, pass_lineage_id, record);
     registry.issued_count = registry.issued_count + 1;
+    cell_count_index::assert_membership_registry_id(count_index, registry_id);
+    cell_count_index::increment_or_create(count_index, home_cell, ctx);
 
     event::emit_authenticated(MembershipPassIssued {
         registry_id,
