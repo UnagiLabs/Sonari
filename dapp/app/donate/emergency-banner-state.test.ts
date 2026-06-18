@@ -46,6 +46,45 @@ describe("buildEmergencyBannerView", () => {
         expect(view?.details).toStrictEqual(details);
     });
 
+    it("extracts an M detail as the magnitude chip model", () => {
+        const magnitude: EmergencyBannerDetail = { label: "M", value: "7.6" };
+        const details: readonly EmergencyBannerDetail[] = [
+            magnitude,
+            { label: "地域", value: "能登半島" },
+        ];
+        const view = buildEmergencyBannerView({ ...campaign, details });
+        expect(view?.magnitude).toStrictEqual(magnitude);
+        expect(view?.details).toStrictEqual(details);
+    });
+
+    it("extracts magnitude from a campaign label when details do not provide it", () => {
+        const view = buildEmergencyBannerView({
+            ...campaign,
+            label: "M 6.3 - 260 km SSE of Dunhuang, China",
+        });
+        expect(view?.magnitude).toStrictEqual({ label: "M", value: "6.3" });
+    });
+
+    it("extracts magnitude from compact M-prefixed labels", () => {
+        const view = buildEmergencyBannerView({
+            ...campaign,
+            label: "M9.1 - 2011 Great Tohoku Earthquake, Japan",
+        });
+        expect(view?.magnitude).toStrictEqual({ label: "M", value: "9.1" });
+    });
+
+    it("does not add magnitude when details do not include an M item", () => {
+        const details: readonly EmergencyBannerDetail[] = [{ label: "地域", value: "能登" }];
+        const view = buildEmergencyBannerView({ ...campaign, status: "実施中", details });
+        expect(Object.keys(view ?? {})).toStrictEqual([
+            "campaignId",
+            "label",
+            "status",
+            "details",
+        ]);
+        expect(view?.magnitude).toBeUndefined();
+    });
+
     it("omits details key when details is an empty array", () => {
         const campaignEmptyDetails: EmergencyBannerCampaign = {
             ...campaign,

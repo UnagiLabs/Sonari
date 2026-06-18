@@ -479,6 +479,8 @@
         },
         "emergency": {
             "tag": "Emergency",
+            "magnitudeLabel": "Magnitude",
+            "liveStatus": "Disaster relief accepting donations",
             "title": "Active Emergency Campaign",
             "body": "A disaster relief campaign is currently accepting donations: {name}",
             "cta": "Donate to this campaign"

@@ -64,3 +64,16 @@ describe("620px 以下でもウォレット接続を使える", () => {
         expect(block).not.toMatch(/wallet-connect/);
     });
 });
+
+describe("760px 以下の緊急バナー SIGNAL レイアウト", () => {
+    const block = mediaBlock(760);
+
+    it("左レールと本体の2列に切り替える", () => {
+        expect(block).toContain("grid-template-columns: 6px minmax(0, 1fr);");
+    });
+
+    it("マグニチュードチップを本体より上に置く", () => {
+        expect(block).toMatch(/\.donate-emergency-banner-magnitude\s*\{[^}]*grid-row:\s*1/);
+        expect(block).toMatch(/\.donate-emergency-banner-content[^{]*\{[^}]*grid-row:\s*auto/);
+    });
+});

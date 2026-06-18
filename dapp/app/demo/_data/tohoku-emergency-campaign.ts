@@ -39,7 +39,7 @@ export function buildTohokuEmergencyCampaign(
     data: TohokuDemoEarthquake,
 ): EmergencyBannerCampaign {
     const details: readonly EmergencyBannerDetail[] = [
-        { label: labels.magnitude, value: `M ${data.magnitude}` },
+        { label: "M", value: String(data.magnitude) },
         { label: labels.mmi, value: `${data.mmi}` },
         { label: labels.region, value: data.region },
         { label: labels.date, value: data.occurredOn },

@@ -34,44 +34,56 @@ export function EmergencyBanner({
         return null;
     }
 
+    const bannerClassName =
+        view.magnitude !== undefined
+            ? "donate-emergency-banner donate-emergency-banner--with-magnitude"
+            : "donate-emergency-banner";
+
     return (
-        <div className="donate-emergency-banner" role="alert">
-            <div className="donate-emergency-banner-header">
-                <span className="donate-emergency-banner-tag">{t("tag")}</span>
-                {view.status !== undefined ? (
-                    <span className="donate-emergency-banner-status">{view.status}</span>
-                ) : null}
-                <h2 className="donate-emergency-banner-title">{t("title")}</h2>
-            </div>
-            <p className="donate-emergency-banner-body">{t("body", { name: view.label })}</p>
-            {view.details !== undefined && view.details.length > 0 ? (
-                <dl className="donate-emergency-banner-details">
-                    {view.details.map((detail) => (
-                        <div className="donate-emergency-banner-detail" key={detail.label}>
-                            <dt>{detail.label}</dt>
-                            <dd>{detail.value}</dd>
-                        </div>
-                    ))}
+        <div className={bannerClassName} role="alert">
+            <div className="donate-emergency-banner-rail" aria-hidden="true" />
+            {view.magnitude !== undefined ? (
+                <dl className="donate-emergency-banner-magnitude">
+                    <div>
+                        <dt>{t("magnitudeLabel")}</dt>
+                        <dd>
+                            <span aria-hidden="true">M</span>
+                            {view.magnitude.value}
+                        </dd>
+                    </div>
                 </dl>
             ) : null}
-            <div className="donate-emergency-banner-actions">
-                {primaryAction !== undefined ? (
-                    <a
-                        className="donate-emergency-banner-cta donate-emergency-banner-cta-primary btn"
-                        href={primaryAction.href}
+            <div className="donate-emergency-banner-content">
+                <div className="donate-emergency-banner-header">
+                    <span className="donate-emergency-banner-tag">{t("tag")}</span>
+                    <span className="donate-emergency-banner-live">
+                        <span className="donate-emergency-banner-live-dot" aria-hidden="true" />
+                        <span>LIVE</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{t("liveStatus")}</span>
+                    </span>
+                </div>
+                <h2 className="donate-emergency-banner-title">{t("title")}</h2>
+                <p className="donate-emergency-banner-body">{t("body", { name: view.label })}</p>
+                <div className="donate-emergency-banner-actions">
+                    {primaryAction !== undefined ? (
+                        <a
+                            className="donate-emergency-banner-cta donate-emergency-banner-cta-primary btn"
+                            href={primaryAction.href}
+                        >
+                            {primaryAction.label}
+                        </a>
+                    ) : null}
+                    <button
+                        type="button"
+                        className="donate-emergency-banner-cta btn"
+                        onClick={() => {
+                            onDonate(view.campaignId);
+                        }}
                     >
-                        {primaryAction.label}
-                    </a>
-                ) : null}
-                <button
-                    type="button"
-                    className="donate-emergency-banner-cta btn"
-                    onClick={() => {
-                        onDonate(view.campaignId);
-                    }}
-                >
-                    {t("cta")}
-                </button>
+                        {t("cta")}
+                    </button>
+                </div>
             </div>
         </div>
     );
