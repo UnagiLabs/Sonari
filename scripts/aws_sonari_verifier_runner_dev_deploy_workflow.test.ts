@@ -64,7 +64,9 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "AWS_SONARI_VERIFIER_RUNNER_DEV_WALRUS_CLI_SHA256",
             "AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_TOKEN_SECRET_ARN",
             "AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN",
+            "WORLD_ID_ACTION: $" + "{{ vars.SONARI_WORLD_ID_ACTION }}",
         ]);
+        expect(workflow).not.toContain("AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_ACTION");
         expect(workflow).not.toContain("AWS_ACCESS_KEY_ID");
         expect(workflow).not.toContain("AWS_SECRET_ACCESS_KEY");
         expect(workflow).not.toContain("secrets.AWS_");

@@ -101,14 +101,14 @@ jobs:
 
       - name: Validate World ID action
         env:
-          NEXT_PUBLIC_WORLD_ID_ACTION: ${{ vars.NEXT_PUBLIC_WORLD_ID_ACTION }}
+          NEXT_PUBLIC_WORLD_ID_ACTION: ${{ vars.SONARI_WORLD_ID_ACTION }}
         shell: bash
         run: |
           set -euo pipefail
 
           if [[ ! "${NEXT_PUBLIC_WORLD_ID_ACTION:-}" =~ ^sonari_membership_register_v[0-9]+$ ]]; then
             echo "NEXT_PUBLIC_WORLD_ID_ACTION must match sonari_membership_register_v<N>"
-            echo "Set it in environment: cloudflare-dapp-worker"
+            echo "Set SONARI_WORLD_ID_ACTION as a repository variable"
             exit 1
           fi
 
@@ -181,7 +181,7 @@ jobs:
           NEXT_PUBLIC_SONARI_IDENTITY_STATUS_URL: ${{ vars.SONARI_IDENTITY_STATUS_URL }}
           NEXT_PUBLIC_WORLD_ID_RP_ID: ${{ vars.SONARI_WORLD_ID_RP_ID }}
           NEXT_PUBLIC_WORLD_ID_ENVIRONMENT: ${{ vars.SONARI_WORLD_ID_ENVIRONMENT }}
-          NEXT_PUBLIC_WORLD_ID_ACTION: ${{ vars.NEXT_PUBLIC_WORLD_ID_ACTION }}
+          NEXT_PUBLIC_WORLD_ID_ACTION: ${{ vars.SONARI_WORLD_ID_ACTION }}
           # pause_state / pool / category_registry は packageID 起点で
           # admin::GenesisObjectCreated イベントから dapp が導出するため env では渡さない。
           # USDC の coin type は Sui 上で一意に決まる定数のため dapp/app/donate/donate-config.ts に持つ。

@@ -78,6 +78,21 @@ describe("dapp deploy workflow", () => {
         );
     });
 
+    it("uses repo-level World ID action as the shared dapp build input", async () => {
+        const workflow = await readWorkflow();
+        const validateStep = stepBlock(workflow, "Validate World ID action");
+        const deployStep = stepBlock(workflow, "Build and deploy to Cloudflare");
+
+        expect(validateStep).toContain(
+            "NEXT_PUBLIC_WORLD_ID_ACTION: $" + "{{ vars.SONARI_WORLD_ID_ACTION }}",
+        );
+        expect(validateStep).toContain("Set SONARI_WORLD_ID_ACTION as a repository variable");
+        expect(deployStep).toContain(
+            "NEXT_PUBLIC_WORLD_ID_ACTION: $" + "{{ vars.SONARI_WORLD_ID_ACTION }}",
+        );
+        expect(workflow).not.toContain("vars.NEXT_PUBLIC_WORLD_ID_ACTION");
+    });
+
     it("passes Enoki public configuration to the dapp build", async () => {
         const workflow = await readWorkflow();
         const deployStep = stepBlock(workflow, "Build and deploy to Cloudflare");
