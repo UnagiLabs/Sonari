@@ -12,36 +12,51 @@ pub const CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY: &str = "SONARI_CENSUS_GRAPHQL_EGR
 
 const GRAPHQL_REQUEST_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_CELL_COUNT_BATCH_SIZE: usize = 100;
+const CHECKPOINT_PAGE_SIZE: u64 = 100;
+const EVENT_PAGE_SIZE: u64 = 100;
+const MAX_GRAPHQL_PAGES: usize = 512;
 const DEFAULT_SHARD_CONCURRENCY_LIMIT: usize = 8;
 const DEFAULT_GRAPHQL_MAX_ATTEMPTS: u32 = 4;
 const LATEST_CHECKPOINT_QUERY: &str = r#"
-query SonariCensusLatestCheckpoints($last: Int!) {
-  checkpoints(last: $last) {
+query SonariCensusLatestCheckpoints($last: Int!, $before: String) {
+  checkpoints(last: $last, before: $before) {
     nodes {
       sequenceNumber
       timestampMs
+    }
+    pageInfo {
+      hasPreviousPage
+      startCursor
     }
   }
 }
 "#;
 const CELL_COUNT_INDEX_EVENTS_QUERY: &str = r#"
-query SonariCensusCellCountIndexEvents($eventType: String!) {
-  events(filter: { type: $eventType }) {
+query SonariCensusCellCountIndexEvents($eventType: String!, $first: Int!, $after: String) {
+  events(filter: { type: $eventType }, first: $first, after: $after) {
     nodes {
       contents {
         json
       }
     }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
   }
 }
 "#;
 const CELL_COUNT_SHARD_EVENTS_QUERY: &str = r#"
-query SonariCensusCellCountShardEvents($eventType: String!) {
-  events(filter: { type: $eventType }) {
+query SonariCensusCellCountShardEvents($eventType: String!, $first: Int!, $after: String) {
+  events(filter: { type: $eventType }, first: $first, after: $after) {
     nodes {
       contents {
         json
       }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
     }
   }
 }
@@ -204,21 +219,16 @@ impl CensusGraphqlClient {
         let config = ShardCountReadConfig::default();
         config.validate()?;
 
-        let checkpoint_response = self.query_json(
-            LATEST_CHECKPOINT_QUERY,
-            serde_json::json!({ "last": 100 }),
-            config.max_attempts,
-        )?;
-        let census_checkpoint =
-            parse_latest_checkpoint_at_or_before(&checkpoint_response, bundle.occurred_at_ms)?;
+        let census_checkpoint = self
+            .resolve_latest_checkpoint_at_or_before(bundle.occurred_at_ms, config.max_attempts)?;
 
         let index_event_type = format!(
             "{}::cell_count_index::CellCountIndexPublished",
             bundle.package_id
         );
-        let index_response = self.query_json(
+        let index_response = self.collect_event_pages(
             CELL_COUNT_INDEX_EVENTS_QUERY,
-            serde_json::json!({ "eventType": index_event_type }),
+            &index_event_type,
             config.max_attempts,
         )?;
         let index = parse_cell_count_index_metadata(
@@ -233,9 +243,9 @@ impl CensusGraphqlClient {
             "{}::cell_count_index::CellCountShardPublished",
             bundle.package_id
         );
-        let shard_response = self.query_json(
+        let shard_response = self.collect_event_pages(
             CELL_COUNT_SHARD_EVENTS_QUERY,
-            serde_json::json!({ "eventType": shard_event_type }),
+            &shard_event_type,
             config.max_attempts,
         )?;
         let shard_object_ids = parse_cell_count_shard_object_ids(
@@ -272,6 +282,68 @@ impl CensusGraphqlClient {
             census_checkpoint,
             counted_cells,
         })
+    }
+
+    fn resolve_latest_checkpoint_at_or_before(
+        &self,
+        occurred_at_ms: u64,
+        max_attempts: u32,
+    ) -> Result<u64, CensusError> {
+        let mut before: Option<String> = None;
+        for _ in 0..MAX_GRAPHQL_PAGES {
+            let response = self.query_json(
+                LATEST_CHECKPOINT_QUERY,
+                checkpoint_page_variables(before.as_deref()),
+                max_attempts,
+            )?;
+            match parse_latest_checkpoint_at_or_before(&response, occurred_at_ms) {
+                Ok(checkpoint) => return Ok(checkpoint),
+                Err(error) => {
+                    if !error
+                        .to_string()
+                        .contains("no Sui checkpoint exists at or before occurred_at_ms")
+                    {
+                        return Err(error);
+                    }
+                }
+            }
+            let page_info = read_checkpoint_page_info(&response, "GraphQL checkpoint pageInfo")?;
+            if !page_info.has_previous_page {
+                return Err(CensusError::InvalidPayload(
+                    "no Sui checkpoint exists at or before occurred_at_ms".to_owned(),
+                ));
+            }
+            before = Some(page_info.start_cursor);
+        }
+        Err(CensusError::InvalidPayload(
+            "Sui checkpoint pagination exceeded safety limit".to_owned(),
+        ))
+    }
+
+    fn collect_event_pages(
+        &self,
+        query: &str,
+        event_type: &str,
+        max_attempts: u32,
+    ) -> Result<Value, CensusError> {
+        let mut after: Option<String> = None;
+        let mut nodes = Vec::new();
+        for _ in 0..MAX_GRAPHQL_PAGES {
+            let response = self.query_json(
+                query,
+                event_page_variables(event_type, after.as_deref()),
+                max_attempts,
+            )?;
+            nodes.extend(graphql_event_nodes(&response)?.iter().cloned());
+            let page_info = read_event_page_info(&response, "GraphQL events pageInfo")?;
+            if !page_info.has_next_page {
+                return Ok(event_response_from_nodes(nodes));
+            }
+            after = Some(page_info.end_cursor);
+        }
+        Err(CensusError::InvalidPayload(
+            "Sui event pagination exceeded safety limit".to_owned(),
+        ))
     }
 
     fn query_json(
@@ -362,6 +434,81 @@ fn counted_cell_from_snapshot(snapshot: CountedCellSnapshot) -> CountedCell {
         cell_band: u64::from(snapshot.cell_band),
         shard_id: snapshot.shard_id,
         active_count: snapshot.active_count.to_string(),
+    }
+}
+
+fn checkpoint_page_variables(before: Option<&str>) -> Value {
+    serde_json::json!({
+        "last": CHECKPOINT_PAGE_SIZE,
+        "before": before,
+    })
+}
+
+fn event_page_variables(event_type: &str, after: Option<&str>) -> Value {
+    serde_json::json!({
+        "eventType": event_type,
+        "first": EVENT_PAGE_SIZE,
+        "after": after,
+    })
+}
+
+fn event_response_from_nodes(nodes: Vec<Value>) -> Value {
+    serde_json::json!({
+        "data": {
+            "events": {
+                "nodes": nodes
+            }
+        }
+    })
+}
+
+struct CheckpointPageInfo {
+    has_previous_page: bool,
+    start_cursor: String,
+}
+
+struct EventPageInfo {
+    has_next_page: bool,
+    end_cursor: String,
+}
+
+fn read_checkpoint_page_info(
+    response: &Value,
+    field: &str,
+) -> Result<CheckpointPageInfo, CensusError> {
+    let page_info = read_path(response, &["data", "checkpoints", "pageInfo"], field)?;
+    let has_previous_page = read_bool_field(page_info, "hasPreviousPage")?;
+    let start_cursor = read_cursor_field(page_info, "startCursor", has_previous_page)?;
+    Ok(CheckpointPageInfo {
+        has_previous_page,
+        start_cursor,
+    })
+}
+
+fn read_event_page_info(response: &Value, field: &str) -> Result<EventPageInfo, CensusError> {
+    let page_info = read_path(response, &["data", "events", "pageInfo"], field)?;
+    let has_next_page = read_bool_field(page_info, "hasNextPage")?;
+    let end_cursor = read_cursor_field(page_info, "endCursor", has_next_page)?;
+    Ok(EventPageInfo {
+        has_next_page,
+        end_cursor,
+    })
+}
+
+fn read_bool_field(value: &Value, field: &str) -> Result<bool, CensusError> {
+    value
+        .get(field)
+        .and_then(Value::as_bool)
+        .ok_or_else(|| CensusError::InvalidPayload(format!("{field} is missing or malformed")))
+}
+
+fn read_cursor_field(value: &Value, field: &str, required: bool) -> Result<String, CensusError> {
+    match value.get(field) {
+        Some(Value::String(cursor)) if !cursor.is_empty() => Ok(cursor.clone()),
+        Some(Value::Null) | None if !required => Ok(String::new()),
+        _ => Err(CensusError::InvalidPayload(format!(
+            "{field} is missing or malformed"
+        ))),
     }
 }
 
@@ -576,11 +723,7 @@ fn parse_cell_count_active_count(field: &Value) -> Result<u64, CensusError> {
 }
 
 fn graphql_event_json_nodes(response: &Value) -> Result<Vec<&Value>, CensusError> {
-    let nodes = read_array_path(
-        response,
-        &["data", "events", "nodes"],
-        "GraphQL event nodes",
-    )?;
+    let nodes = graphql_event_nodes(response)?;
     nodes
         .iter()
         .map(|node| {
@@ -593,6 +736,14 @@ fn graphql_event_json_nodes(response: &Value) -> Result<Vec<&Value>, CensusError
             })
         })
         .collect()
+}
+
+fn graphql_event_nodes(response: &Value) -> Result<&Vec<Value>, CensusError> {
+    read_array_path(
+        response,
+        &["data", "events", "nodes"],
+        "GraphQL event nodes",
+    )
 }
 
 fn read_path<'a>(value: &'a Value, path: &[&str], field: &str) -> Result<&'a Value, CensusError> {
@@ -701,10 +852,12 @@ fn same_object_id(left: &str, right: &str) -> bool {
 mod tests {
     use super::{
         CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, CENSUS_GRAPHQL_NETWORK_KEY, CensusGraphqlClient,
-        ShardCountReadConfig, SuiGraphqlNetwork, group_affected_cells_by_shard,
+        ShardCountReadConfig, SuiGraphqlNetwork, checkpoint_page_variables,
+        event_response_from_nodes, graphql_event_nodes, group_affected_cells_by_shard,
         h3_cell_dynamic_field_key, parse_cell_count_index_metadata,
         parse_cell_count_shard_object_ids, parse_latest_checkpoint_at_or_before,
-        parse_shard_count_response, shard_count_batches, shard_count_query_variables,
+        parse_shard_count_response, read_checkpoint_page_info, read_event_page_info,
+        shard_count_batches, shard_count_query_variables,
     };
     use crate::AffectedCell;
     use sonari_tee_core::TeeContext;
@@ -802,6 +955,38 @@ mod tests {
         let error = parse_latest_checkpoint_at_or_before(&response, 9).unwrap_err();
 
         assert!(error.to_string().contains("checkpoint"));
+    }
+
+    #[test]
+    fn checkpoint_page_info_drives_backfill_when_recent_page_is_too_new() {
+        let response = serde_json::json!({
+            "data": {
+                "checkpoints": {
+                    "nodes": [
+                        { "sequenceNumber": "90", "timestampMs": "2000" },
+                        { "sequenceNumber": "91", "timestampMs": "2010" }
+                    ],
+                    "pageInfo": {
+                        "hasPreviousPage": true,
+                        "startCursor": "checkpoint-cursor-90"
+                    }
+                }
+            }
+        });
+
+        assert!(parse_latest_checkpoint_at_or_before(&response, 1_000).is_err());
+
+        let page_info =
+            read_checkpoint_page_info(&response, "GraphQL checkpoint pageInfo").unwrap();
+
+        assert!(page_info.has_previous_page);
+        assert_eq!(
+            checkpoint_page_variables(Some(&page_info.start_cursor)),
+            serde_json::json!({
+                "last": 100,
+                "before": "checkpoint-cursor-90"
+            }),
+        );
     }
 
     #[test]
@@ -938,6 +1123,65 @@ mod tests {
         assert_eq!(shards.len(), 2);
         assert_eq!(shards.get(&10), Some(&shard_10));
         assert_eq!(shards.get(&20), Some(&shard_20));
+    }
+
+    #[test]
+    fn shard_parser_reads_required_shards_after_event_pages_are_merged() {
+        let package_id = object_id("aa");
+        let index_id = object_id("33");
+        let first_page = serde_json::json!({
+            "data": {
+                "events": {
+                    "nodes": [
+                        { "contents": { "json": {
+                            "package_id": package_id,
+                            "cell_count_index_id": index_id,
+                            "shard_id": "10",
+                            "shard_object_id": object_id("10")
+                        }}}
+                    ],
+                    "pageInfo": {
+                        "hasNextPage": true,
+                        "endCursor": "event-cursor-1"
+                    }
+                }
+            }
+        });
+        let second_page = serde_json::json!({
+            "data": {
+                "events": {
+                    "nodes": [
+                        { "contents": { "json": {
+                            "package_id": package_id,
+                            "cell_count_index_id": index_id,
+                            "shard_id": "20",
+                            "shard_object_id": object_id("20")
+                        }}}
+                    ],
+                    "pageInfo": {
+                        "hasNextPage": false,
+                        "endCursor": null
+                    }
+                }
+            }
+        });
+        let first_page_info = read_event_page_info(&first_page, "GraphQL events pageInfo").unwrap();
+        let mut nodes = graphql_event_nodes(&first_page).unwrap().clone();
+        nodes.extend(graphql_event_nodes(&second_page).unwrap().iter().cloned());
+        let merged = event_response_from_nodes(nodes);
+
+        let shards = parse_cell_count_shard_object_ids(
+            &merged,
+            &package_id,
+            &index_id,
+            &HashSet::from([10, 20]),
+        )
+        .unwrap();
+
+        assert!(first_page_info.has_next_page);
+        assert_eq!(first_page_info.end_cursor, "event-cursor-1");
+        assert_eq!(shards.get(&10), Some(&object_id("10")));
+        assert_eq!(shards.get(&20), Some(&object_id("20")));
     }
 
     #[test]
