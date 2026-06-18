@@ -26,6 +26,7 @@ export interface ResidenceProofResponse {
 export interface MembershipIssueTransactionObjects {
     readonly pauseState: string;
     readonly membershipRegistry: string;
+    readonly cellCountIndex: string;
     readonly allowedResidenceCellRegistry: string;
 }
 
@@ -169,6 +170,7 @@ export function buildRegisterMemberTransaction(
         arguments: [
             tx.object(input.objects.pauseState),
             tx.object(input.objects.membershipRegistry),
+            tx.object(input.objects.cellCountIndex),
             tx.object(input.objects.allowedResidenceCellRegistry),
             tx.pure.u64(BigInt(homeCell)),
             residenceProof,
