@@ -1,8 +1,9 @@
 "use client";
 
-import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -10,9 +11,13 @@ import {
     readGenesisObjectIds,
     selectGenesisObjectId,
 } from "../chain/genesis-objects";
+import { readClaimCampaigns } from "../claim/claim-campaigns";
+import { createClaimReadClient } from "../claim/claim-read-client";
 import { LoadingIndicator } from "../components/loading-indicator";
+import { parseMainPoolObject } from "../dashboard/dashboard-chain";
 import { formatAmount } from "../i18n/format";
 import { SiteTopbar } from "../i18n/site-topbar";
+import { buildDisasterPoolViews } from "../pools/disaster-pool-view-model";
 import type { SonariLocale } from "../register/wizard/locale";
 import { dAppKit } from "../wallet/dapp-kit";
 import { readWalletNetwork, resolveGrpcBaseUrl } from "../wallet/wallet-network";
@@ -24,8 +29,8 @@ import { buildDonateTransaction, type DonateDestinationInput } from "./donate-tr
 import {
     buildCategoryListItems,
     buildDonateDonorPassReadState,
-    buildDonateSplitRows,
     buildDonateTxResultView,
+    type CategoryListItem,
     type DonateDestinationMode,
     type DonateDestinationReadState,
     type DonateDonorPassReadState,
@@ -35,23 +40,31 @@ import {
     resolveDonateSubmitDisabledReason,
 } from "./donate-view-state";
 import { readDonorPassId, readDonorPassIdUntilVisible } from "./donor-pass-read";
-import { EmergencyBanner } from "./emergency-banner";
-import { EmergencyBannerSection } from "./emergency-banner-section";
 import type { EmergencyBannerCampaign } from "./emergency-banner-state";
 
 const QUICK_AMOUNTS = ["$50", "$100", "$250", "$1,000"] as const;
 const DEFAULT_DONATION_AMOUNT = "400";
 const POST_SUBMIT_DONOR_PASS_LOOKUP_ATTEMPTS = 8;
 const POST_SUBMIT_DONOR_PASS_LOOKUP_DELAY_MS = 750;
+const USDC_DECIMALS = 1_000_000n;
+
+type DonateMainPoolMetricsState =
+    | { readonly status: "idle" | "loading" | "error" }
+    | {
+          readonly status: "ready";
+          readonly totalReceived: string;
+          readonly totalSent: string;
+          readonly activeReliefPools: string;
+      };
 
 /**
  * デモページ用の差し込み設定。
  * このオブジェクトが渡されたときだけ DonateView は「デモモード」になり、
- * 緊急バナーに固定キャンペーンを表示し、実送金を一切行わない。
- * 本番 /donate は demo を渡さないため、挙動は従来と変わらない。
+ * 固定キャンペーンを扱うデモの実送金を一切行わない。
+ * 本番 /donate は demo を渡さない。
  */
 export interface DonateDemoConfig {
-    /** 緊急バナーに固定表示するキャンペーン（実施中・概要付き）。 */
+    /** デモ対象のキャンペーン（実施中・概要付き）。 */
     readonly emergencyCampaign: EmergencyBannerCampaign;
     /** 結果パネルに表示する、デモであることの注記（ローカライズ済み）。 */
     readonly statusNote: string;
@@ -92,6 +105,8 @@ export function DonateView({
     const demoMode = demo !== undefined;
     const t = useTranslations("donate");
     const account = useCurrentAccount();
+    const suiClient = useCurrentClient();
+    const claimClient = useMemo(() => createClaimReadClient(suiClient), [suiClient]);
     const network = readWalletNetwork();
     // env から読むのは packageID だけ。pause_state / pool は packageID 起点で導出する。
     const envConfig = useMemo(() => readDonateEnvConfig(), []);
@@ -121,6 +136,9 @@ export function DonateView({
     const [categoryPoolId, setCategoryPoolId] = useState("");
     const [amountInput, setAmountInput] = useState(DEFAULT_DONATION_AMOUNT);
     const [txState, setTxState] = useState<DonateTxState>({ status: "idle" });
+    const [mainPoolMetricsState, setMainPoolMetricsState] = useState<DonateMainPoolMetricsState>({
+        status: "idle",
+    });
 
     const amountValidation = useMemo(() => validateDonationAmount(amountInput), [amountInput]);
     const isWalletConnected = account !== null;
@@ -203,6 +221,68 @@ export function DonateView({
             cancelled = true;
         };
     }, [demoMode, fundingPackageId, network]);
+
+    useEffect(() => {
+        if (demoMode || embedded || config === null || fundingPackageId === null) {
+            setMainPoolMetricsState({ status: "idle" });
+            return;
+        }
+
+        let cancelled = false;
+        setMainPoolMetricsState({ status: "loading" });
+
+        void (async () => {
+            try {
+                const nowMs = Date.now();
+                const [poolResponse, campaignResult] = await Promise.all([
+                    suiClient.getObjects({
+                        objectIds: [config.mainPoolId],
+                        include: { json: true },
+                    }),
+                    readClaimCampaigns(claimClient, { packageId: fundingPackageId, nowMs }),
+                ]);
+                if (cancelled) {
+                    return;
+                }
+
+                const mainPool = parseMainPoolObject(poolResponse.objects[0]);
+                if (mainPool === null) {
+                    console.error("donate metrics failed: main pool response is invalid.");
+                    setMainPoolMetricsState({ status: "error" });
+                    return;
+                }
+                if (campaignResult.kind === "error") {
+                    console.error(`donate metrics failed: ${campaignResult.message}`);
+                    setMainPoolMetricsState({ status: "error" });
+                    return;
+                }
+
+                const activeReliefPoolCount = buildDisasterPoolViews(
+                    campaignResult.campaigns,
+                    nowMs,
+                ).filter((pool) => pool.status === "active").length;
+
+                setMainPoolMetricsState({
+                    status: "ready",
+                    totalReceived: formatMicroUsdc(mainPool.totalReceivedUsdc, locale),
+                    totalSent: formatMicroUsdc(mainPool.totalFloorFundedUsdc, locale),
+                    activeReliefPools: formatAmount(activeReliefPoolCount, locale),
+                });
+            } catch (error) {
+                if (cancelled) {
+                    return;
+                }
+                console.error(
+                    `donate metrics failed: ${error instanceof Error ? error.message : "unknown error"}`,
+                );
+                setMainPoolMetricsState({ status: "error" });
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [claimClient, config, demoMode, embedded, fundingPackageId, locale, suiClient]);
 
     useEffect(() => {
         // デモモードではチェーンを読まず、空の ready 状態にしてフォーム表示だけ保つ。
@@ -374,42 +454,6 @@ export function DonateView({
                 ? "submit-status submit-status-submitting"
                 : "submit-status";
 
-    const selectedAmountLabel = useMemo(() => {
-        if (!amountValidation.ok) {
-            return `$${amountInput.trim().replace(/,/g, "")}`;
-        }
-
-        const normalized = amountInput.trim().replace(/\$/g, "").replace(/,/g, "");
-        const amount = Number(normalized);
-        if (Number.isFinite(amount)) {
-            return `$${formatAmount(amount, locale, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
-        }
-
-        return `$${normalized}`;
-    }, [amountValidation.ok, amountInput, locale]);
-
-    const splitRows = useMemo(
-        () =>
-            buildDonateSplitRows({
-                mode,
-                campaignLabel:
-                    destinationState.campaigns.find((campaign) => campaign.id === campaignId)
-                        ?.label ?? t("types.campaign.label"),
-                categoryLabel:
-                    destinationState.categories.find((category) => category.id === categoryPoolId)
-                        ?.label ?? t("types.category.label"),
-                t,
-            }),
-        [
-            campaignId,
-            categoryPoolId,
-            destinationState.campaigns,
-            destinationState.categories,
-            mode,
-            t,
-        ],
-    );
-
     const txMessage = () => {
         if (demo !== undefined) {
             return demo.statusNote;
@@ -474,23 +518,8 @@ export function DonateView({
         setTxState({ status: "idle" });
     }
 
-    function handleCampaignChange(nextCampaignId: string) {
-        setCampaignId(nextCampaignId);
-        setTxState({ status: "idle" });
-    }
-
     function handleCategoryChange(nextCategoryPoolId: string) {
         setCategoryPoolId(nextCategoryPoolId);
-        setTxState({ status: "idle" });
-    }
-
-    function handleBannerDonate(bannerCampaignId: string) {
-        // デモモードではバナー CTA を無効化し、送金フローへのモード切替を行わない。
-        if (demoMode) {
-            return;
-        }
-        setMode("campaign");
-        setCampaignId(bannerCampaignId);
         setTxState({ status: "idle" });
     }
 
@@ -659,39 +688,21 @@ export function DonateView({
                                     <small>{t("types.category.description")}</small>
                                 </span>
                             </label>
+                            <Link
+                                className="choice-option donate-specific-disaster-choice"
+                                href="/pools"
+                            >
+                                <span>
+                                    <strong>{t("types.specificDisaster.label")}</strong>
+                                    <small>{t("types.specificDisaster.description")}</small>
+                                </span>
+                                <span className="choice-arrow" aria-hidden="true">
+                                    →
+                                </span>
+                            </Link>
                         </div>
                     </fieldset>
                 )}
-
-                {!lockDestination && mode === "campaign" ? (
-                    <fieldset className="control-group">
-                        <legend>{t("form.campaignLegend")}</legend>
-                        <div className="pool-select-list">
-                            {destinationState.status === "ready" &&
-                            destinationState.campaigns.length > 0 ? (
-                                destinationState.campaigns.map((campaign) => (
-                                    <label className="pool-select-option" key={campaign.id}>
-                                        <input
-                                            checked={campaign.id === campaignId}
-                                            name="donateCampaign"
-                                            onChange={() => handleCampaignChange(campaign.id)}
-                                            type="radio"
-                                            value={campaign.id}
-                                        />
-                                        <span>
-                                            <strong>{campaign.label}</strong>
-                                            <small>{campaign.campaignId}</small>
-                                        </span>
-                                    </label>
-                                ))
-                            ) : destinationState.status === "loading" ? (
-                                <p className="faint">{t("submit.disabled.campaignLoading")}</p>
-                            ) : destinationState.campaigns.length === 0 ? (
-                                <p className="faint">{t("submit.disabled.campaignNotFound")}</p>
-                            ) : null}
-                        </div>
-                    </fieldset>
-                ) : null}
 
                 {mode === "category" ? (
                     <fieldset className="control-group">
@@ -701,71 +712,25 @@ export function DonateView({
                                 <p className="faint">{t("submit.disabled.categoryLoading")}</p>
                             ) : destinationState.status === "ready" &&
                               destinationState.categories.length === 0 ? (
-                                <>
-                                    <p className="faint">{t("submit.disabled.categoryNotFound")}</p>
-                                    {buildCategoryListItems([]).map((item) =>
-                                        item.kind === "comingSoon" ? (
-                                            <label
-                                                className="pool-select-option pool-select-option-disabled"
-                                                key={item.id}
-                                            >
-                                                <input
-                                                    disabled
-                                                    name="donateCategory"
-                                                    type="radio"
-                                                    value={item.id}
-                                                />
-                                                <span>
-                                                    <strong>{t(item.labelKey)}</strong>
-                                                    <small className="tag tag-neutral">
-                                                        {t("category.comingSoonBadge")}
-                                                    </small>
-                                                </span>
-                                            </label>
-                                        ) : null,
-                                    )}
-                                </>
+                                <p className="faint">{t("submit.disabled.categoryNotFound")}</p>
                             ) : (
-                                buildCategoryListItems(destinationState.categories).map((item) => {
-                                    if (item.kind === "available") {
-                                        return (
-                                            <label className="pool-select-option" key={item.id}>
-                                                <input
-                                                    checked={item.categoryPoolId === categoryPoolId}
-                                                    name="donateCategory"
-                                                    onChange={() =>
-                                                        handleCategoryChange(item.categoryPoolId)
-                                                    }
-                                                    type="radio"
-                                                    value={item.categoryPoolId}
-                                                />
-                                                <span>
-                                                    <strong>{item.label}</strong>
-                                                    <small>{item.categoryPoolId}</small>
-                                                </span>
-                                            </label>
-                                        );
-                                    }
-                                    return (
-                                        <label
-                                            className="pool-select-option pool-select-option-disabled"
-                                            key={item.id}
-                                        >
-                                            <input
-                                                disabled
-                                                name="donateCategory"
-                                                type="radio"
-                                                value={item.id}
-                                            />
-                                            <span>
-                                                <strong>{t(item.labelKey)}</strong>
-                                                <small className="tag tag-neutral">
-                                                    {t("category.comingSoonBadge")}
-                                                </small>
-                                            </span>
-                                        </label>
-                                    );
-                                })
+                                buildCategoryListItems(destinationState.categories).map((item) => (
+                                    <label className="pool-select-option" key={item.id}>
+                                        <input
+                                            checked={item.categoryPoolId === categoryPoolId}
+                                            name="donateCategory"
+                                            onChange={() =>
+                                                handleCategoryChange(item.categoryPoolId)
+                                            }
+                                            type="radio"
+                                            value={item.categoryPoolId}
+                                        />
+                                        <span>
+                                            <strong>{formatCategoryOptionLabel(t, item)}</strong>
+                                            <small>{item.categoryPoolId}</small>
+                                        </span>
+                                    </label>
+                                ))
                             )}
                         </div>
                     </fieldset>
@@ -813,49 +778,12 @@ export function DonateView({
                         {isDonateInFlight ? t("form.submitting") : t("form.submit")}
                     </button>
                 </div>
+                <p className="faint" style={{ textAlign: "center" }}>
+                    {t("note.inline")}
+                </p>
             </form>
 
-            {embedded ? (
-                // embedded（/donate/[eventId]）では分配プレビューと DonorPass ノートを出さず、
-                // フォーム＋送金結果だけの単一カラムにしてシンプルにする。
-                // 送金結果は寄付を実行した後（idle 以外）にだけ出す。
-                txState.status !== "idle" ? (
-                    resultPanel
-                ) : null
-            ) : (
-                <aside className="donate-side" aria-label={t("split.title")}>
-                    <section className="preview-block">
-                        <div className="panel-header compact">
-                            <div>
-                                <div className="eyebrow">{t("split.eyebrow")}</div>
-                                <h2>{t("split.title")}</h2>
-                            </div>
-                            <span className="stat-num">{selectedAmountLabel}</span>
-                        </div>
-                        <div className="split-list">
-                            {splitRows.map((row) => (
-                                <div className="split-row" key={row.key}>
-                                    <div>
-                                        <strong>{row.label}</strong>
-                                        <small>{row.detail}</small>
-                                    </div>
-                                    <span>{row.value}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </section>
-
-                    {resultPanel}
-
-                    <section className="donate-note">
-                        <h3>{t("note.title")}</h3>
-                        <p>{t("note.body")}</p>
-                        <a className="text-action" href="/dashboard">
-                            {t("note.link")}
-                        </a>
-                    </section>
-                </aside>
-            )}
+            {txState.status !== "idle" ? resultPanel : null}
         </section>
     );
 
@@ -872,15 +800,6 @@ export function DonateView({
                 <SiteTopbar active="donate" locale={locale} />
 
                 <main className="page donate-page">
-                    {/* デモは固定キャンペーンを直接描画し、本番は top と同一の共通バナーを使う。 */}
-                    {demo !== undefined ? (
-                        <EmergencyBanner
-                            campaign={demo.emergencyCampaign}
-                            onDonate={handleBannerDonate}
-                        />
-                    ) : (
-                        <EmergencyBannerSection onDonate={handleBannerDonate} />
-                    )}
                     <header className="donate-hero">
                         <div>
                             <div className="eyebrow">{t("hero.eyebrow")}</div>
@@ -889,11 +808,53 @@ export function DonateView({
                         </div>
                     </header>
 
+                    {mainPoolMetricsState.status === "ready" ? (
+                        <section
+                            className="metrics-strip donate-metrics"
+                            aria-label={t("metrics.label")}
+                        >
+                            <article className="metric-item">
+                                <div className="label">{t("metrics.totalReceived")}</div>
+                                <div className="value">{mainPoolMetricsState.totalReceived}</div>
+                            </article>
+                            <article className="metric-item">
+                                <div className="label">{t("metrics.totalSent")}</div>
+                                <div className="value">{mainPoolMetricsState.totalSent}</div>
+                            </article>
+                            <article className="metric-item">
+                                <div className="label">{t("metrics.activeReliefPools")}</div>
+                                <div className="value">
+                                    {mainPoolMetricsState.activeReliefPools}
+                                </div>
+                            </article>
+                        </section>
+                    ) : null}
+
                     {donateForm}
                 </main>
             </div>
         </>
     );
+}
+
+function formatMicroUsdc(value: bigint, locale: SonariLocale): string {
+    return formatAmount(bigintToNumber(value) / Number(USDC_DECIMALS), locale, {
+        currency: "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+function bigintToNumber(value: bigint): number {
+    const max = BigInt(Number.MAX_SAFE_INTEGER);
+    return value > max ? Number.MAX_SAFE_INTEGER : Number(value);
+}
+
+function formatCategoryOptionLabel(t: (key: string) => string, item: CategoryListItem): string {
+    if (item.category === 1) {
+        return t("category.options.earthquake");
+    }
+    return item.label;
 }
 
 function formatSubmitDisabledReason(

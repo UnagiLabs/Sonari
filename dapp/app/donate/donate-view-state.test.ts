@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-    buildDonateSplitRows,
     buildDonateDonorPassReadState,
     buildDonateTxResultView,
     resolveDonateSubmitDisabledReason,
@@ -69,69 +68,6 @@ const readyDonorPassState: DonateDonorPassReadState = {
     status: "ready",
     passId: null,
 };
-
-const t = (key: string) => key;
-
-describe("buildDonateSplitRows", () => {
-    it("describes general donations as 95% main and 5% operations", () => {
-        const rows = buildDonateSplitRows({
-            mode: "general",
-            campaignLabel: "Campaign",
-            categoryLabel: "Category",
-            t,
-        });
-
-        expect(rows.map((row) => [row.key, row.value])).toEqual([
-            ["main", "split.value.generalMainShare"],
-            ["operations", "split.value.operationsShare"],
-        ]);
-    });
-
-    it("describes campaign donations without claiming a fixed amount split", () => {
-        const rows = buildDonateSplitRows({
-            mode: "campaign",
-            campaignLabel: "Campaign A",
-            categoryLabel: "Category",
-            t,
-        });
-
-        expect(rows).toEqual([
-            {
-                key: "campaign",
-                label: "Campaign A",
-                detail: "split.campaign.detail",
-                value: "split.value.campaignTerms",
-            },
-            {
-                key: "main",
-                label: "split.main.label",
-                detail: "split.main.campaignDetail",
-                value: "split.value.campaignRemainder",
-            },
-            {
-                key: "operations",
-                label: "split.operations.label",
-                detail: "split.operations.campaignDetail",
-                value: "split.value.campaignOperations",
-            },
-        ]);
-    });
-
-    it("describes category donations as 90% category, 5% main, and 5% operations", () => {
-        const rows = buildDonateSplitRows({
-            mode: "category",
-            campaignLabel: "Campaign",
-            categoryLabel: "Category A",
-            t,
-        });
-
-        expect(rows.map((row) => [row.key, row.value])).toEqual([
-            ["category", "split.value.categoryShare"],
-            ["main", "split.value.categoryMainShare"],
-            ["operations", "split.value.operationsShare"],
-        ]);
-    });
-});
 
 describe("resolveDonateSubmitDisabledReason", () => {
     it("returns configMissing when config is not ready", () => {
@@ -304,38 +240,26 @@ describe("buildCategoryListItems", () => {
     it("places the earthquake category (category number 1) first when it exists", () => {
         const categories = [floodCategory, earthquakeCategory];
         const items = buildCategoryListItems(categories);
-        const availableItems = items.filter((item) => item.kind === "available");
-        expect(availableItems[0]).toMatchObject({ kind: "available", category: 1 });
+        expect(items[0]).toMatchObject({ kind: "available", category: 1 });
     });
 
-    it("places coming soon items after available items", () => {
+    it("returns only selectable category items", () => {
         const categories = [earthquakeCategory];
         const items = buildCategoryListItems(categories);
-        const firstComingSoonIndex = items.findIndex((item) => item.kind === "comingSoon");
-        // All items before the first comingSoon must be available
-        const itemsBeforeComingSoon = items.slice(0, firstComingSoonIndex);
-        expect(itemsBeforeComingSoon.every((item) => item.kind === "available")).toBe(true);
-        expect(firstComingSoonIndex).toBeGreaterThan(-1);
+        expect(items).toEqual([
+            {
+                kind: "available",
+                id: earthquakeCategory.id,
+                label: earthquakeCategory.label,
+                categoryPoolId: earthquakeCategory.categoryPoolId,
+                category: earthquakeCategory.category,
+            },
+        ]);
     });
 
-    it("coming soon items have no categoryPoolId and are not selectable", () => {
-        const categories = [earthquakeCategory];
-        const items = buildCategoryListItems(categories);
-        const comingSoonItems = items.filter((item) => item.kind === "comingSoon");
-        expect(comingSoonItems.length).toBeGreaterThan(0);
-        for (const item of comingSoonItems) {
-            expect(item.kind).toBe("comingSoon");
-            if (item.kind === "comingSoon") {
-                // comingSoon items must not have categoryPoolId
-                expect(item).not.toHaveProperty("categoryPoolId");
-            }
-        }
-    });
-
-    it("returns coming soon items even when categories array is empty", () => {
+    it("returns an empty list when no categories are available", () => {
         const items = buildCategoryListItems([]);
-        const comingSoonItems = items.filter((item) => item.kind === "comingSoon");
-        expect(comingSoonItems.length).toBeGreaterThan(0);
+        expect(items).toEqual([]);
     });
 
     it("preserves original order for non-earthquake categories after the earthquake entry", () => {
@@ -343,10 +267,9 @@ describe("buildCategoryListItems", () => {
         const cat3 = makeCategory(3, "0x" + "d".repeat(64));
         const categories = [cat3, earthquakeCategory, cat2];
         const items = buildCategoryListItems(categories);
-        const availableItems = items.filter((item) => item.kind === "available");
-        expect(availableItems[0]).toMatchObject({ kind: "available", category: 1 });
+        expect(items[0]).toMatchObject({ kind: "available", category: 1 });
         // cat3 (index 0 in input) and cat2 (index 2 in input) maintain relative order after earthquake
-        const nonEarthquake = availableItems.slice(1);
+        const nonEarthquake = items.slice(1);
         expect(nonEarthquake[0]).toMatchObject({ kind: "available", category: 3 });
         expect(nonEarthquake[1]).toMatchObject({ kind: "available", category: 2 });
     });
@@ -366,11 +289,9 @@ describe("buildCategoryListItems", () => {
     it("available item labelKey is the category label from CategoryDestination", () => {
         const categories = [earthquakeCategory];
         const items = buildCategoryListItems(categories);
-        const available = items.find((item) => item.kind === "available");
+        const available = items[0];
         expect(available).toBeDefined();
-        if (available?.kind === "available") {
-            expect(available.label).toBe("Earthquake Relief Pool");
-        }
+        expect(available?.label).toBe("Earthquake Relief Pool");
     });
 });
 

@@ -6,24 +6,13 @@ import type { DonationAmountErrorCode, DonationAmountValidationResult } from "./
 import type { EmergencyBannerCampaign } from "./emergency-banner-state";
 
 export type CategoryListItem =
-    | {
-          readonly kind: "available";
-          readonly id: string;
-          readonly label: string;
-          readonly categoryPoolId: string;
-          readonly category: number;
-      }
-    | {
-          readonly kind: "comingSoon";
-          readonly id: string;
-          readonly labelKey: string;
-      };
-
-// labelKey is relative to the "donate" i18n namespace (e.g. t("category.comingSoon.flood"))
-const COMING_SOON_POOLS: ReadonlyArray<{ readonly id: string; readonly labelKey: string }> = [
-    { id: "comingSoon-flood", labelKey: "category.comingSoon.flood" },
-    { id: "comingSoon-student", labelKey: "category.comingSoon.student" },
-];
+    {
+        readonly kind: "available";
+        readonly id: string;
+        readonly label: string;
+        readonly categoryPoolId: string;
+        readonly category: number;
+    };
 
 const EARTHQUAKE_CATEGORY = 1;
 
@@ -49,91 +38,10 @@ export function buildCategoryListItems(
         category: cat.category,
     }));
 
-    const comingSoon: CategoryListItem[] = COMING_SOON_POOLS.map((pool) => ({
-        kind: "comingSoon",
-        id: pool.id,
-        labelKey: pool.labelKey,
-    }));
-
-    return [...available, ...comingSoon];
+    return available;
 }
 
 export type DonateDestinationMode = "general" | "campaign" | "category";
-
-export interface DonateSplitRow {
-    readonly key: string;
-    readonly label: string;
-    readonly detail: string;
-    readonly value: string;
-}
-
-export function buildDonateSplitRows(input: {
-    readonly mode: DonateDestinationMode;
-    readonly campaignLabel: string;
-    readonly categoryLabel: string;
-    readonly t: (key: string) => string;
-}): readonly DonateSplitRow[] {
-    if (input.mode === "general") {
-        return [
-            {
-                key: "main",
-                label: input.t("split.main.label"),
-                detail: input.t("split.main.detail"),
-                value: input.t("split.value.generalMainShare"),
-            },
-            {
-                key: "operations",
-                label: input.t("split.operations.label"),
-                detail: input.t("split.operations.detail"),
-                value: input.t("split.value.operationsShare"),
-            },
-        ];
-    }
-
-    if (input.mode === "campaign") {
-        return [
-            {
-                key: "campaign",
-                label: input.campaignLabel,
-                detail: input.t("split.campaign.detail"),
-                value: input.t("split.value.campaignTerms"),
-            },
-            {
-                key: "main",
-                label: input.t("split.main.label"),
-                detail: input.t("split.main.campaignDetail"),
-                value: input.t("split.value.campaignRemainder"),
-            },
-            {
-                key: "operations",
-                label: input.t("split.operations.label"),
-                detail: input.t("split.operations.campaignDetail"),
-                value: input.t("split.value.campaignOperations"),
-            },
-        ];
-    }
-
-    return [
-        {
-            key: "category",
-            label: input.categoryLabel,
-            detail: input.t("split.category.detail"),
-            value: input.t("split.value.categoryShare"),
-        },
-        {
-            key: "main",
-            label: input.t("split.main.label"),
-            detail: input.t("split.main.detail"),
-            value: input.t("split.value.categoryMainShare"),
-        },
-        {
-            key: "operations",
-            label: input.t("split.operations.label"),
-            detail: input.t("split.operations.detail"),
-            value: input.t("split.value.operationsShare"),
-        },
-    ];
-}
 
 export interface DonateDestinationReadState {
     readonly status: "idle" | "loading" | "ready" | "error";
