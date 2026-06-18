@@ -4,6 +4,7 @@ module contracts::identity_verification_tests;
 use contracts::accessor;
 use contracts::admin;
 use contracts::allowed_residence_cell;
+use contracts::cell_count_index;
 use contracts::identity_registry;
 use contracts::identity_result_v1;
 use contracts::membership;
@@ -448,11 +449,13 @@ fun initialized_with_registered_member(): test_scenario::Scenario {
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut membership_registry = scenario.take_shared<membership::MembershipRegistry>();
+        let mut count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
         let residence_registry =
             scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
         accessor::register_member(
             &pause_state,
             &mut membership_registry,
+            &mut count_index,
             &residence_registry,
             HOME_CELL,
             residence_proof(),
@@ -462,6 +465,7 @@ fun initialized_with_registered_member(): test_scenario::Scenario {
         );
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(membership_registry);
+        test_scenario::return_shared(count_index);
         test_scenario::return_shared(residence_registry);
     };
 

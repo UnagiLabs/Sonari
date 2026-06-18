@@ -4,6 +4,7 @@ module contracts::admin_program_tests;
 use contracts::admin;
 use contracts::allowed_residence_cell;
 use contracts::category_pool;
+use contracts::cell_count_index;
 use contracts::disaster_event;
 use contracts::donation;
 use contracts::identity_registry;
@@ -46,6 +47,22 @@ fun init_creates_genesis_objects_and_tracking_events() {
         membership::registry_created_event_fields(*membership_events.borrow(0));
     assert!(membership_registry_kind == membership::registry_kind_membership());
 
+    let cell_count_index_events = event::events_by_type<cell_count_index::CellCountIndexCreated>();
+    assert!(cell_count_index_events.length() == 1);
+    let (
+        cell_count_index_id_from_event,
+        cell_count_index_membership_registry_id_from_event,
+        cell_count_index_h3_resolution_from_event,
+        cell_count_index_shard_count_from_event,
+        _,
+    ) = cell_count_index::cell_count_index_created_event_fields(*cell_count_index_events.borrow(0));
+    assert!(cell_count_index_membership_registry_id_from_event == membership_registry_id_from_event);
+    assert!(cell_count_index_h3_resolution_from_event == 7u8);
+    assert!(cell_count_index_shard_count_from_event == 4096u64);
+
+    let cell_count_shard_events = event::events_by_type<cell_count_index::CellCountShardCreated>();
+    assert!(cell_count_shard_events.length() == 0);
+
     let verifier_events = event::events_by_type<metadata_verifier::RegistryCreated>();
     assert!(verifier_events.length() == 1);
     let (verifier_registry_id_from_event, verifier_registry_kind, _, _) =
@@ -66,21 +83,25 @@ fun init_creates_genesis_objects_and_tracking_events() {
     assert!(allowed_residence_events.length() == 1);
 
     let genesis_events = event::events_by_type<admin::GenesisObjectCreated>();
-    assert!(genesis_events.length() == 12);
-    let (_, category_registry_kind, category_registry_shared, _, _) =
+    assert!(genesis_events.length() == 13);
+    let (cell_count_index_id_from_genesis, cell_count_index_kind, cell_count_index_shared, _, _) =
         admin::genesis_object_created_event_fields(*genesis_events.borrow(7));
-    assert!(category_registry_kind == admin::genesis_kind_category_registry());
-    assert!(category_registry_shared);
+    assert!(cell_count_index_kind == admin::genesis_kind_cell_count_index());
+    assert!(cell_count_index_shared);
     let (_, identity_registry_kind, identity_registry_shared, _, _) =
         admin::genesis_object_created_event_fields(*genesis_events.borrow(8));
     assert!(identity_registry_kind == admin::genesis_kind_identity_registry());
     assert!(identity_registry_shared);
-    let (_, earthquake_pool_kind, earthquake_pool_shared, _, _) =
+    let (_, category_registry_kind, category_registry_shared, _, _) =
         admin::genesis_object_created_event_fields(*genesis_events.borrow(9));
+    assert!(category_registry_kind == admin::genesis_kind_category_registry());
+    assert!(category_registry_shared);
+    let (_, earthquake_pool_kind, earthquake_pool_shared, _, _) =
+        admin::genesis_object_created_event_fields(*genesis_events.borrow(10));
     assert!(earthquake_pool_kind == admin::genesis_kind_earthquake_pool());
     assert!(earthquake_pool_shared);
     let (disaster_registry_id_from_genesis, disaster_registry_kind, disaster_registry_shared, _, _) =
-        admin::genesis_object_created_event_fields(*genesis_events.borrow(10));
+        admin::genesis_object_created_event_fields(*genesis_events.borrow(11));
     assert!(disaster_registry_kind == admin::genesis_kind_disaster_registry());
     assert!(disaster_registry_shared);
     let (
@@ -89,7 +110,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
         allowed_residence_registry_shared,
         _,
         _,
-    ) = admin::genesis_object_created_event_fields(*genesis_events.borrow(11));
+    ) = admin::genesis_object_created_event_fields(*genesis_events.borrow(12));
     assert!(
         allowed_residence_registry_kind == admin::genesis_kind_allowed_residence_cell_registry(),
     );
@@ -103,6 +124,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
         assert!(test_scenario::has_most_recent_shared<pools::OperationsPool>());
         assert!(test_scenario::has_most_recent_shared<donation::DonorRegistry>());
         assert!(test_scenario::has_most_recent_shared<membership::MembershipRegistry>());
+        assert!(test_scenario::has_most_recent_shared<cell_count_index::CellCountIndex>());
         assert!(test_scenario::has_most_recent_shared<metadata_verifier::VerifierRegistry>());
         assert!(test_scenario::has_most_recent_shared<identity_registry::IdentityRegistry>());
         assert!(test_scenario::has_most_recent_shared<category_pool::CategoryRegistry>());
@@ -119,6 +141,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
         let operations_pool = scenario.take_shared<pools::OperationsPool>();
         let donor_registry = scenario.take_shared<donation::DonorRegistry>();
         let membership_registry = scenario.take_shared<membership::MembershipRegistry>();
+        let cell_count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
         let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
         let identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
         let category_registry = scenario.take_shared<category_pool::CategoryRegistry>();
@@ -133,6 +156,17 @@ fun init_creates_genesis_objects_and_tracking_events() {
         assert!(operations_pool_id_from_event == pools::operations_pool_id(&operations_pool));
         assert!(donor_registry_id_from_event == donation::registry_id(&donor_registry));
         assert!(membership_registry_id_from_event == membership::registry_id(&membership_registry));
+        let (
+            cell_count_index_id,
+            cell_count_index_membership_registry_id,
+            cell_count_index_h3_resolution,
+            cell_count_index_shard_count,
+        ) = cell_count_index::index_fields_for_testing(&cell_count_index);
+        assert!(cell_count_index_id_from_event == cell_count_index_id);
+        assert!(cell_count_index_id_from_genesis == cell_count_index_id);
+        assert!(cell_count_index_membership_registry_id == membership::registry_id(&membership_registry));
+        assert!(cell_count_index_h3_resolution == 7u8);
+        assert!(cell_count_index_shard_count == 4096u64);
         assert!(
             verifier_registry_id_from_event == metadata_verifier::registry_id(&verifier_registry),
         );
@@ -152,6 +186,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
         test_scenario::return_shared(operations_pool);
         test_scenario::return_shared(donor_registry);
         test_scenario::return_shared(membership_registry);
+        test_scenario::return_shared(cell_count_index);
         test_scenario::return_shared(verifier_registry);
         test_scenario::return_shared(identity_registry);
         test_scenario::return_shared(category_registry);

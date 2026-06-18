@@ -2,6 +2,7 @@ module contracts::admin;
 
 use contracts::campaign as campaign_v2;
 use contracts::category_pool;
+use contracts::cell_count_index;
 use contracts::allowed_residence_cell;
 use contracts::disaster_event;
 use contracts::donation;
@@ -30,6 +31,7 @@ const GENESIS_KIND_CATEGORY_REGISTRY: u8 = 10;
 const GENESIS_KIND_EARTHQUAKE_POOL: u8 = 11;
 const GENESIS_KIND_DISASTER_REGISTRY: u8 = 12;
 const GENESIS_KIND_ALLOWED_RESIDENCE_CELL_REGISTRY: u8 = 13;
+const GENESIS_KIND_CELL_COUNT_INDEX: u8 = 14;
 
 const EGlobalPaused: u64 = 0;
 const ETargetPaused: u64 = 1;
@@ -108,13 +110,15 @@ fun initialize(ctx: &mut TxContext) {
     let verifier_registry_id = metadata_verifier::create_verifier_registry(ctx);
     emit_genesis_object(verifier_registry_id, GENESIS_KIND_VERIFIER_REGISTRY, true, ctx);
 
-    // CategoryRegistry は ClaimIndex と同じ counter 位置に置き、IdentityRegistry の ID を保持する
-    let mut category_registry = category_pool::new_category_registry(ctx);
-    let category_registry_id = object::id(&category_registry);
-    emit_genesis_object(category_registry_id, GENESIS_KIND_CATEGORY_REGISTRY, true, ctx);
+    let cell_count_index_id = cell_count_index::create_index(membership_registry_id, ctx);
+    emit_genesis_object(cell_count_index_id, GENESIS_KIND_CELL_COUNT_INDEX, true, ctx);
 
     let identity_registry_id = identity_registry::create_identity_registry(ctx);
     emit_genesis_object(identity_registry_id, GENESIS_KIND_IDENTITY_REGISTRY, true, ctx);
+
+    let mut category_registry = category_pool::new_category_registry(ctx);
+    let category_registry_id = object::id(&category_registry);
+    emit_genesis_object(category_registry_id, GENESIS_KIND_CATEGORY_REGISTRY, true, ctx);
 
     let earthquake_pool_id =
         category_pool::create_category_pool(&mut category_registry, category_pool::category_earthquake(), ctx);
@@ -589,6 +593,10 @@ public(package) fun genesis_kind_disaster_registry(): u8 {
 
 public(package) fun genesis_kind_allowed_residence_cell_registry(): u8 {
     GENESIS_KIND_ALLOWED_RESIDENCE_CELL_REGISTRY
+}
+
+public(package) fun genesis_kind_cell_count_index(): u8 {
+    GENESIS_KIND_CELL_COUNT_INDEX
 }
 
 fun emit_genesis_object(object_id: ID, object_kind: u8, shared: bool, ctx: &TxContext) {

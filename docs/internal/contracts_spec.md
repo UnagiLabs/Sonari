@@ -545,6 +545,60 @@ public struct MembershipPass has key {
 - 居住セルは後から変更でき、変更時刻を `home_cell_registered_at_ms` に保存する
   （災害後変更の駆け込み Claim は cutoff 判定で拒否される）。
 
+### 8.1.1 CellCountIndex / 居住セル別 active count
+
+Membership 登録と居住セル変更は、H3 resolution 7 のセル別 active member count も更新する。
+目的は Floor Census が membership event を広い範囲で replay せず、対象セルだけを読めるようにすること。
+
+`CellCountIndex` は `MembershipRegistry` ごとに 1 つだけ作る shared object とする。
+init で作るのは `CellCountIndex` のみで、`CellCountShard` は事前作成しない。
+`CellCountIndex.membership_registry_id` は対象 `MembershipRegistry` の ID を保持する。
+登録と居住セル変更では、渡された `CellCountIndex` が対象 registry と一致することを contract 側で検証する。
+
+```move
+public struct CellCountIndex has key {
+    id: UID,
+    membership_registry_id: ID,
+    h3_resolution: u8, // 7
+    shard_count: u64,  // 4096
+}
+
+public struct CellCountShard has key, store {
+    id: UID,
+    index_id: ID,
+    shard_id: u64,
+}
+
+public struct CellCount has copy, drop, store {
+    active_count: u64,
+}
+```
+
+shard は `h3_cell % 4096` で contract が必ず計算する。
+外部 caller は shard ID を渡さない。
+`CellCountIndex` の dynamic object field は `shard_id → CellCountShard` を持つ。
+これにより後続 runner は GraphQL `atCheckpoint` で shard object id と metadata を解決できる。
+`CellCountShard` の dynamic field は `h3_cell → CellCount` を持つ。
+
+登録時は、重複発行検査と residence proof 検証の後に count を増やす。
+対象 shard が無ければ同じ tx で lazy create し、`CellCountShardCreated` を emit する。
+対象 cell key が無ければ `CellCount { active_count: 1 }` を作る。
+既存 key があれば `active_count` を 1 増やす。
+
+居住セル変更時は、old cell と new cell が同じなら count を変更しない。
+異なる場合は old cell を 1 減らし、new cell を 1 増やす。
+old shard が無い、old cell が無い、または old count が 0 の場合は state inconsistency として失敗する。
+new shard が無ければ lazy create する。
+count が 0 になっても cell key は削除せず、`active_count = 0` のまま保持する。
+再度同じ cell に member が登録または移動した場合は、既存 key を増やす。
+
+local smoke / devInspect / test 用の公開 reader として、
+`reader::read_cell_count_or_zero` と `reader::read_cell_counts_or_zero` を提供する。
+missing shard と missing cell は `0` として返す。
+後続 TEE / runner は affected cells を `h3_cell % 4096` で group し、
+存在する shard の dynamic field から count を読む。
+存在しない shard と存在しない cell はどちらも `0` として扱う。
+
 > **Floor Census 連携**: `MembershipPassIssued` と `HomeCellRegistered` は
 > authenticated event として発行する。
 > Floor Census TEE は、災害前に登録済みだった lineage と居住セルを集計するとき、
