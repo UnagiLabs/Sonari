@@ -6,24 +6,13 @@ import type { DonationAmountErrorCode, DonationAmountValidationResult } from "./
 import type { EmergencyBannerCampaign } from "./emergency-banner-state";
 
 export type CategoryListItem =
-    | {
-          readonly kind: "available";
-          readonly id: string;
-          readonly label: string;
-          readonly categoryPoolId: string;
-          readonly category: number;
-      }
-    | {
-          readonly kind: "comingSoon";
-          readonly id: string;
-          readonly labelKey: string;
-      };
-
-// labelKey is relative to the "donate" i18n namespace (e.g. t("category.comingSoon.flood"))
-const COMING_SOON_POOLS: ReadonlyArray<{ readonly id: string; readonly labelKey: string }> = [
-    { id: "comingSoon-flood", labelKey: "category.comingSoon.flood" },
-    { id: "comingSoon-student", labelKey: "category.comingSoon.student" },
-];
+    {
+        readonly kind: "available";
+        readonly id: string;
+        readonly label: string;
+        readonly categoryPoolId: string;
+        readonly category: number;
+    };
 
 const EARTHQUAKE_CATEGORY = 1;
 
@@ -49,13 +38,7 @@ export function buildCategoryListItems(
         category: cat.category,
     }));
 
-    const comingSoon: CategoryListItem[] = COMING_SOON_POOLS.map((pool) => ({
-        kind: "comingSoon",
-        id: pool.id,
-        labelKey: pool.labelKey,
-    }));
-
-    return [...available, ...comingSoon];
+    return available;
 }
 
 export type DonateDestinationMode = "general" | "campaign" | "category";

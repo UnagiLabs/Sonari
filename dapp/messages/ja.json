@@ -348,6 +348,10 @@
                 "description": "選択したカテゴリプールへ寄付を振り向けます。",
                 "destination": "メイン＋カテゴリプールへ"
             },
+            "specificDisaster": {
+                "label": "特定の災害に寄付する",
+                "description": "災害別プール一覧から支援先を選びます。"
+            },
             "earthquake": {
                 "label": "地震救援",
                 "description": "資金の大半を選んだ災害救援プールへ振り向けます。",
@@ -497,6 +501,9 @@
             "comingSoon": {
                 "flood": "洪水救援",
                 "student": "学生支援"
+            },
+            "options": {
+                "earthquake": "地震"
             }
         }
     },

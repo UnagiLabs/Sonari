@@ -57,10 +57,15 @@ describe("/donate wallet section removal", () => {
 
     it("寄付画面の主要な経路は残す", () => {
         expect(donateViewSource).toContain('<SiteTopbar active="donate" locale={locale} />');
-        expect(donateViewSource).toContain("<EmergencyBanner");
         expect(donateViewSource).toContain("donate-layout");
         expect(donateViewSource).toContain('className="donate-form"');
         expect(donateViewSource).toContain("executeWalletTransaction");
+    });
+
+    it("寄付ページに緊急バナーを描画しない", () => {
+        expect(donateViewSource).not.toContain("<EmergencyBanner");
+        expect(donateViewSource).not.toContain("EmergencyBannerSection");
+        expect(donateViewSource).not.toContain("handleBannerDonate");
     });
 
     it("ヘッダーの Wallet 接続は残す", () => {
@@ -157,7 +162,6 @@ describe("DonateView initialMode / initialCampaignId / lockDestination props", (
     it("props 未指定時の従来挙動用トークンを維持する", () => {
         // 既存の非回帰トークン
         expect(donateViewSource).toContain('<SiteTopbar active="donate" locale={locale} />');
-        expect(donateViewSource).toContain("<EmergencyBanner");
         expect(donateViewSource).toContain("donate-layout");
         expect(donateViewSource).toContain('className="donate-form"');
         expect(donateViewSource).toContain("executeWalletTransaction");
@@ -224,6 +228,25 @@ describe("/donate single-column redesign", () => {
         expect(donateViewSource).toContain('style={{ textAlign: "center" }}');
     });
 
+    it("通常の donate 画面ではキャンペーン候補リストを出さず pools への導線を出す", () => {
+        expect(donateViewSource).not.toContain('name="donateCampaign"');
+        expect(donateViewSource).not.toContain("handleCampaignChange");
+        expect(donateViewSource).not.toContain('t("form.campaignLegend")');
+        expect(donateViewSource).toContain('href="/pools"');
+        expect(donateViewSource).toContain('className="choice-option donate-specific-disaster-choice"');
+        expect(donateViewSource).not.toContain('className="choice-link-dot"');
+        expect(donateViewSource).toContain('t("types.specificDisaster.label")');
+        expect(donateViewSource).toContain("→");
+    });
+
+    it("カテゴリ寄付では実カテゴリだけを選択肢として表示する", () => {
+        expect(donateViewSource).toContain('name="donateCategory"');
+        expect(donateViewSource).toContain("buildCategoryListItems(destinationState.categories)");
+        expect(donateViewSource).toContain("formatCategoryOptionLabel");
+        expect(donateViewSource).toContain('t("category.options.earthquake")');
+        expect(donateViewSource).not.toContain("pool-select-option-disabled");
+    });
+
     it("donate layout と metrics は 820px の単一カラムに収める", () => {
         expect(globalsSource).toMatch(
             /\.donate-layout\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)/u,
@@ -253,14 +276,31 @@ describe("/donate single-column redesign", () => {
             if (!isRecord(donateMessages)) {
                 throw new Error("donate messages must be an object");
             }
+            const form = donateMessages["form"];
+            const types = donateMessages["types"];
+            const category = donateMessages["category"];
             const metrics = donateMessages["metrics"];
             const note = donateMessages["note"];
-            if (!isRecord(metrics) || !isRecord(note)) {
-                throw new Error("donate metrics/note messages must be objects");
+            if (
+                !isRecord(form) ||
+                !isRecord(types) ||
+                !isRecord(category) ||
+                !isRecord(metrics) ||
+                !isRecord(note)
+            ) {
+                throw new Error("donate form/types/category/metrics/note messages must be objects");
+            }
+            const specificDisaster = types["specificDisaster"];
+            const categoryOptions = category["options"];
+            if (!isRecord(specificDisaster) || !isRecord(categoryOptions)) {
+                throw new Error("donate specific disaster/category options messages must be objects");
             }
             expect(metrics).toHaveProperty("totalReceived");
             expect(metrics).toHaveProperty("totalSent");
             expect(metrics).toHaveProperty("activeReliefPools");
+            expect(specificDisaster).toHaveProperty("label");
+            expect(specificDisaster).toHaveProperty("description");
+            expect(categoryOptions).toHaveProperty("earthquake");
             expect(note).toHaveProperty("inline");
         }
     });
