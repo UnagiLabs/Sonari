@@ -7,6 +7,7 @@ import {
 } from "@sonari/earthquake-relayer";
 import {
     BCS_ENUMS,
+    type AffectedCellsArtifact,
     type EnclaveVerificationMetadata,
     type EarthquakeOraclePayload,
     type EvidenceManifest,
@@ -1200,18 +1201,13 @@ describe("AWS runner workflow helper", () => {
             "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
-        const baseResult = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
-        const result = {
-            ...baseResult,
-            affected_cells: {
-                ...baseResult.affected_cells,
-                affected_cells: Array.from({ length: 20_000 }, (_, index) => ({
-                    h3_index: String(6_088_190_135_139_041_27n + BigInt(index)),
-                    intensity_value: 831,
-                    cell_band: 2,
-                })),
-            },
-        };
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"), {
+            affectedCellLeaves: Array.from({ length: 20_000 }, (_, index) => ({
+                h3_index: String(6_088_190_135_139_041_27n + BigInt(index)),
+                intensity_value: 831,
+                cell_band: 2,
+            })),
+        });
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
             ec2: new RecordingEc2Client(),
@@ -1253,7 +1249,7 @@ describe("AWS runner workflow helper", () => {
             1_800_000_000_001,
         );
         const bytes = new TextEncoder().encode("source bytes");
-        const result = finalizedResultWithRawManifest(bytes);
+        const result = mixedLandWaterFinalizedResult(bytes);
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
         const sourceArchive = new RecordingSourceArchiveAdapter(bytes);
         const relayer = new RecordingRelayerAdapter();
@@ -1938,7 +1934,7 @@ describe("AWS runner workflow helper", () => {
             "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
-        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        const result = mixedLandWaterFinalizedResult(new TextEncoder().encode("source bytes"));
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
         await repository.markSourceArchiveResult(
             "us7000sonari",
@@ -1971,6 +1967,8 @@ describe("AWS runner workflow helper", () => {
             instance_id: "i-proof",
         });
 
+        expect((result.payload as EarthquakeOraclePayload).affected_cell_count).toBe(1);
+        expect(result.evidence_manifest?.affected_cells.total_cell_count).toBe(2);
         expect(registrar.inputs).toEqual([
             {
                 event_uid: (result.payload as EarthquakeOraclePayload).event_uid,
@@ -1978,7 +1976,7 @@ describe("AWS runner workflow helper", () => {
                 affected_cells_uri: "walrus://blob/cellsBlob_123456",
                 affected_cells_hash: result.affected_cells_ref?.source_hash,
                 affected_cells_root: (result.payload as EarthquakeOraclePayload).affected_cells_root,
-                affected_cell_count: (result.payload as EarthquakeOraclePayload).affected_cell_count,
+                affected_cell_count: result.evidence_manifest?.affected_cells.total_cell_count,
                 geo_resolution: 7,
             },
         ]);
@@ -3065,9 +3063,26 @@ function finalizedResult(): Extract<TeeCoreResult, { status: "finalized" }> {
 
 function finalizedResultWithRawManifest(
     bytes: Uint8Array,
-    options: { sourceUri?: string; eventRevision?: number } = {},
+    options: {
+        sourceUri?: string;
+        eventRevision?: number;
+        affectedCellLeaves?: AffectedCellsArtifact["affected_cells"];
+        landCellCount?: number;
+    } = {},
 ): Extract<TeeCoreResult, { status: "finalized" }> {
     const eventRevision = options.eventRevision ?? 1;
+    const affectedCellLeaves = options.affectedCellLeaves ?? [
+        { h3_index: "608819013513904127", intensity_value: 831, cell_band: 2 },
+    ];
+    const landCellCount = options.landCellCount ?? affectedCellLeaves.length;
+    if (
+        !Number.isSafeInteger(landCellCount) ||
+        landCellCount < 1 ||
+        landCellCount > affectedCellLeaves.length
+    ) {
+        throw new Error("fixture land cell count must be between 1 and affected cell count");
+    }
+    const waterCellCount = affectedCellLeaves.length - landCellCount;
     const hash = `0x${sha256Hex(bytes)}`;
     const manifest: RawDataManifest = {
         entries: [
@@ -3096,7 +3111,7 @@ function finalizedResultWithRawManifest(
         cell_metric: "USGS_MMI",
         cell_aggregation: "H3_CENTER_BILINEAR",
         intensity_scale: "MMI_X100",
-        affected_cells: [{ h3_index: "608819013513904127", intensity_value: 831, cell_band: 2 }],
+        affected_cells: affectedCellLeaves,
     };
     const affectedCellsRoot = computeAffectedCellsRootHex(affectedCells);
     if (affectedCellsRoot === null) {
@@ -3137,10 +3152,10 @@ function finalizedResultWithRawManifest(
             uri: affectedCellsRef.uri,
             hash: affectedCellsHash,
             root: affectedCellsRoot,
-            count: 1,
-            total_cell_count: 1,
-            land_cell_count: 1,
-            water_cell_count: 0,
+            count: landCellCount,
+            total_cell_count: affectedCellLeaves.length,
+            land_cell_count: landCellCount,
+            water_cell_count: waterCellCount,
             land_allowlist_version: 0,
             land_allowlist_root: `0x${"00".repeat(32)}`,
             land_classifier: "all_affected_cells_land_compat_v1",
@@ -3160,6 +3175,7 @@ function finalizedResultWithRawManifest(
         ...(result.payload as EarthquakeOraclePayload),
         event_revision: eventRevision,
         affected_cells_root: affectedCellsRoot,
+        affected_cell_count: landCellCount,
         evidence_manifest_uri: evidenceManifestRef.uri,
         evidence_manifest_hash: evidenceManifestHash,
     };
@@ -3173,6 +3189,18 @@ function finalizedResultWithRawManifest(
         affected_cells_ref: affectedCellsRef,
         evidence_manifest_ref: evidenceManifestRef,
     };
+}
+
+function mixedLandWaterFinalizedResult(
+    bytes: Uint8Array,
+): Extract<TeeCoreResult, { status: "finalized" }> {
+    return finalizedResultWithRawManifest(bytes, {
+        affectedCellLeaves: [
+            { h3_index: "608819013513904127", intensity_value: 831, cell_band: 2 },
+            { h3_index: "608819013513904128", intensity_value: 731, cell_band: 1 },
+        ],
+        landCellCount: 1,
+    });
 }
 
 function sha256Hex(bytes: Uint8Array): string {

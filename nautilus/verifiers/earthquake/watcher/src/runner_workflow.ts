@@ -2255,7 +2255,7 @@ function affectedCellsProofRegistrationInput(
         affected_cells_uri: affectedCellsRef.uri,
         affected_cells_hash: affectedCellsRef.source_hash,
         affected_cells_root: payload.affected_cells_root,
-        affected_cell_count: payload.affected_cell_count,
+        affected_cell_count: evidenceManifest.affected_cells.total_cell_count,
         geo_resolution: evidenceManifest.affected_cells.geo_resolution,
     };
 }
@@ -2481,7 +2481,10 @@ function evidenceManifestBindingError(input: {
         input.evidenceManifest.affected_cells.hash !== input.affectedCellsRef.source_hash ||
         input.evidenceManifest.affected_cells.root !== input.payload.affected_cells_root ||
         input.evidenceManifest.affected_cells.count !== input.payload.affected_cell_count ||
-        input.evidenceManifest.affected_cells.count !== input.affectedCells.affected_cells.length ||
+        input.evidenceManifest.affected_cells.land_cell_count !==
+            input.payload.affected_cell_count ||
+        input.evidenceManifest.affected_cells.total_cell_count !==
+            input.affectedCells.affected_cells.length ||
         input.evidenceManifest.affected_cells.geo_resolution !==
             input.affectedCells.geo_resolution ||
         input.affectedCellsRef.size_bytes !== input.affectedCellsBytes.byteLength ||
