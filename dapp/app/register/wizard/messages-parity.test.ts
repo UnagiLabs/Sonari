@@ -238,23 +238,46 @@ describe("messages catalog parity", () => {
     });
 
     it("welcome の connect panel 説明を catalog で管理する", () => {
-        // gas-free（ガス代肩代わり）の説明のみを connect panel に残す。
-        // Google zkLogin の補足（walletGoogleTitle/Body）は冗長なため削除済み。
-        const keys = ["register.wizard.welcome.walletSponsorNote"];
+        // gas-free（ガス代肩代わり）の説明と、登録済みウォレット向けの案内を catalog 管理する。
+        // 説明は太字リード（lead）＋本文（body）に分割し、状態で出し分ける。
+        const keys = [
+            "register.wizard.welcome.sponsorLead",
+            "register.wizard.welcome.walletSponsorNote",
+            "register.wizard.welcome.updateCta",
+            "register.wizard.welcome.membership.activeLead",
+            "register.wizard.welcome.membership.activeBody",
+        ];
         for (const key of keys) {
             expect(en.has(key), key).toBe(true);
             expect(ja.has(key), key).toBe(true);
         }
     });
 
-    it("welcome step は connect panel 説明を実際に参照する", () => {
+    it("welcome step は connect panel 説明と登録済み案内を実際に参照する", () => {
+        expect(welcomeStepSource).toContain('t("sponsorLead")');
         expect(welcomeStepSource).toContain('t("walletSponsorNote")');
+        expect(welcomeStepSource).toContain('t("updateCta")');
+        expect(welcomeStepSource).toContain('t("membership.activeLead")');
+        expect(welcomeStepSource).toContain('t("membership.activeBody")');
     });
 
     it("削除した Google zkLogin 補足文言キーを残さない", () => {
         for (const key of [
             "register.wizard.welcome.walletGoogleTitle",
             "register.wizard.welcome.walletGoogleBody",
+        ]) {
+            expect(en.has(key), key).toBe(false);
+            expect(ja.has(key), key).toBe(false);
+        }
+    });
+
+    it("旧 registered カードの文言キーを残さない", () => {
+        // 登録済み状態は別カード＋ダッシュボード CTA をやめ、connect panel 内の
+        // インラインノート＋「登録を更新」CTA に統合したため、旧キーは削除する。
+        for (const key of [
+            "register.wizard.welcome.membership.registeredTitle",
+            "register.wizard.welcome.membership.registeredBody",
+            "register.wizard.welcome.membership.dashboardCta",
         ]) {
             expect(en.has(key), key).toBe(false);
             expect(ja.has(key), key).toBe(false);

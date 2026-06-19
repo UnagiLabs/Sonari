@@ -37,13 +37,14 @@
                 },
                 "walletHint": "Sui ウォレットを接続",
                 "gasFree": "ガス代不要",
-                "walletSponsorNote": "初回メンバーシップ SBT 発行の network fee は Sonari が負担するため、SUI は不要です。",
+                "sponsorLead": "ガス代は不要。",
+                "walletSponsorNote": "メンバーシップ SBT 発行の network fee は Sonari が負担します。",
                 "cta": "はじめる",
+                "updateCta": "登録を更新",
                 "membership": {
                     "checking": "メンバーシップ SBT を確認中…",
-                    "registeredTitle": "すでにメンバーシップ SBT をお持ちです。",
-                    "registeredBody": "このウォレット（{ownerShort}）にはメンバーシップ SBT があります。ダッシュボードへ移動するか、下の「はじめる」から登録を更新できます。",
-                    "dashboardCta": "ダッシュボードへ",
+                    "activeLead": "メンバーシップ SBT 有効。",
+                    "activeBody": "このウォレットは登録済みです。居住エリアや本人確認の更新へ進めます。",
                     "errorNote": "メンバーシップ SBT を確認できませんでした。「はじめる」で続行できます。"
                 }
             },

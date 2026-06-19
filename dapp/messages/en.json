@@ -37,13 +37,14 @@
                 },
                 "walletHint": "Connect your Sui wallet",
                 "gasFree": "Gas-free",
-                "walletSponsorNote": "No SUI is needed for the first Membership SBT issuance because Sonari sponsors the network fee.",
+                "sponsorLead": "No gas fee.",
+                "walletSponsorNote": "Sonari sponsors the network cost of issuing your Membership SBT.",
                 "cta": "Get started",
+                "updateCta": "Update registration",
                 "membership": {
                     "checking": "Checking your Membership SBT…",
-                    "registeredTitle": "You already have a Membership SBT.",
-                    "registeredBody": "This wallet ({ownerShort}) already holds a Membership SBT. Go to your dashboard, or use Get started below to update your registration.",
-                    "dashboardCta": "Go to dashboard",
+                    "activeLead": "Membership SBT active.",
+                    "activeBody": "This wallet is already registered — continue to update your residence or identity.",
                     "errorNote": "Could not check your Membership SBT. You can still continue with Get started."
                 }
             },

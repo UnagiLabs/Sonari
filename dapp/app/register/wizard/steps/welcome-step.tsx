@@ -1,7 +1,6 @@
 "use client";
 
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { WalletConnect } from "../../../wallet/wallet-connect";
@@ -29,6 +28,27 @@ function HexIcon() {
                 points="12,3 20,7.5 20,16.5 12,21 4,16.5 4,7.5"
                 stroke="currentColor"
                 strokeWidth="2"
+            />
+        </svg>
+    );
+}
+
+// 登録済みウォレット向けノートで使う、塗りつぶし六角形＋白チェックのアイコン。
+// 六角形は currentColor（sage）、内側のチェックは白。サイズは CSS で制御する。
+function HexCheckIcon() {
+    return (
+        <svg aria-hidden="true" className="wizard-hex-check" viewBox="0 0 24 24">
+            <polygon
+                fill="currentColor"
+                points="12,2.5 20.5,7.25 20.5,16.75 12,21.5 3.5,16.75 3.5,7.25"
+            />
+            <path
+                d="M8 12.3 L11 15.3 L16.5 8.8"
+                fill="none"
+                stroke="#fff"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2.1"
             />
         </svg>
     );
@@ -78,6 +98,9 @@ export function WelcomeStep({ onNext }: { readonly onNext: () => void }) {
         lookupEnabled: membershipPackageId.length > 0,
     });
 
+    // 既登録ウォレットかどうか。connect panel 内のノート出し分けと CTA 文言を切り替える。
+    const alreadyMember = presenceView.kind === "registered";
+
     return (
         <section
             aria-labelledby="wizard-welcome-title"
@@ -120,31 +143,30 @@ export function WelcomeStep({ onNext }: { readonly onNext: () => void }) {
                     </span>
                 </div>
                 <WalletConnect />
-                <p className="wizard-sponsor-note">
-                    <HexIcon />
-                    <span>{t("walletSponsorNote")}</span>
-                </p>
+                {alreadyMember ? (
+                    <p className="wizard-member-note">
+                        <HexCheckIcon />
+                        <span>
+                            <strong className="wizard-note-lead">
+                                {t("membership.activeLead")}
+                            </strong>{" "}
+                            {t("membership.activeBody")}
+                        </span>
+                    </p>
+                ) : (
+                    <p className="wizard-sponsor-note">
+                        <HexIcon />
+                        <span>
+                            <strong className="wizard-note-lead">{t("sponsorLead")}</strong>{" "}
+                            {t("walletSponsorNote")}
+                        </span>
+                    </p>
+                )}
             </div>
 
             {presenceView.kind === "checking" ? (
                 <div className="field-note" role="note">
                     <small>{t("membership.checking")}</small>
-                </div>
-            ) : null}
-
-            {presenceView.kind === "registered" ? (
-                <div className="wizard-card wizard-membership-notice">
-                    <p className="wizard-membership-notice-title">
-                        {t("membership.registeredTitle")}
-                    </p>
-                    <p className="muted">
-                        {t("membership.registeredBody", { ownerShort: presenceView.ownerShort })}
-                    </p>
-                    <div className="wizard-cta-bar">
-                        <Link className="btn btn-primary btn-lg" href="/dashboard">
-                            {t("membership.dashboardCta")}
-                        </Link>
-                    </div>
                 </div>
             ) : null}
 
@@ -161,7 +183,7 @@ export function WelcomeStep({ onNext }: { readonly onNext: () => void }) {
                     onClick={onNext}
                     type="button"
                 >
-                    {t("cta")}
+                    {alreadyMember ? t("updateCta") : t("cta")}
                 </button>
             </div>
         </section>
