@@ -58,7 +58,6 @@ export function WelcomeStep({ onNext }: { readonly onNext: () => void }) {
     return (
         <section aria-labelledby="wizard-welcome-title" className="wizard-step-content">
             <header className="wizard-heading">
-                <div className="eyebrow">{t("eyebrow")}</div>
                 <h1 className="wizard-title" id="wizard-welcome-title">
                     {t("title")}
                 </h1>

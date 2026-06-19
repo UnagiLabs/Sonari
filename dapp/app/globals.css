@@ -2566,39 +2566,71 @@ h4 {
 }
 
 /* -------------------------------------------------------------------------
- * Residence picker – 検索バー（通常フロー）＋地図ステージ（STEP 5）
+ * Residence picker – contained 2カラム（左レール＋枠付き地図パネル）
+ *
+ * デスクトップ(≥880px)は検索/選択中エリア/凡例/プライバシーを左レールに積み、
+ * 地図を右の枠付きカードへ収める。モバイルは検索→地図→選択→凡例→プライバシー
+ * の 1カラムへ素直に折り返す（地図をフルブリードにせず、ページは通常スクロール）。
+ * grid-template-areas を使い、同じ DOM 順のまま 2つのレイアウトを切り替える。
  * ---------------------------------------------------------------------- */
 
-/* picker 全体ラッパ: 検索バーと地図ステージを縦に並べる */
-.residence-picker {
+.residence-layout {
   display: grid;
-  gap: 8px;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "search"
+    "map"
+    "railrest";
 }
 
-/* 検索バー: 通常フローで地図の上に配置（絶対配置しない）。
-   ラベルを上、検索入力＋現在地ボタンを同じ行（中央そろえ）、ヒントを下に置く。 */
-.residence-search-bar {
+@media (min-width: 880px) {
+  .residence-layout {
+    grid-template-columns: minmax(280px, 352px) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      "search   map"
+      "railrest map";
+    column-gap: 24px;
+    row-gap: 16px;
+    align-items: start;
+  }
+}
+
+/* 左レール下段（選択中エリア・凡例・プライバシー注記）。検索カードの下／地図の下
+   に積む。デスクトップで地図が縦に伸びても、この列は中身を上詰めにして広がりを
+   余白として下に逃がす（rail 要素どうしの間隔が間延びしないようにする）。 */
+.residence-rail-rest {
+  grid-area: railrest;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  background: var(--cream-50, #fafaf7);
+  gap: 14px;
+}
+
+@media (min-width: 880px) {
+  .residence-rail-rest {
+    gap: 16px;
+    align-self: start;
+  }
+}
+
+/* 検索カード（左レール上段）: ラベル・検索入力・現在地ボタン・ヒントを縦に積む。 */
+.residence-search-bar {
+  grid-area: search;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 8px 10px;
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
 }
 
 .residence-search-label {
   color: var(--sage-900);
   font-size: 13px;
   font-weight: 600;
-}
-
-/* 検索入力（Google のオートコンプリート）とボタンを横並びで縦中央そろえ。 */
-.residence-search-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
 }
 
 /* 注入される PlaceAutocompleteElement をホスト幅にそろえ、はみ出し・過大表示を防ぐ。 */
@@ -2610,70 +2642,105 @@ h4 {
   width: 100%;
 }
 
+/* 現在地ボタンは検索入力の下に全幅で積む。 */
 .residence-locate-btn {
+  width: 100%;
   white-space: nowrap;
-  /* 入力欄に対して視覚的にそろうよう、ボタンを少し上へ寄せる。 */
-  transform: translateY(-4mm);
 }
 
 .residence-search-hint {
   color: var(--ink-muted);
   font-size: 12px;
+  line-height: 1.5;
 }
 
-.residence-map-stage {
-  position: relative;
-  overflow: hidden;
+/* 選択中エリア（確定カード） */
+.residence-selection-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
 }
 
-.residence-map-stage .residence-map-canvas {
-  display: block;
-  width: 100%;
-  height: 360px;
+.residence-selection-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
 }
 
-/* 地図上部オーバーレイ: 通知専用（検索バーは通常フローへ移動済み） */
-.residence-overlay-top {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 10;
-  padding: 8px;
-  pointer-events: none;
+.residence-selection-body {
+  display: flex;
+  align-items: center;
+  gap: 13px;
 }
 
-.residence-overlay-top > * {
-  pointer-events: auto;
+.residence-selection-hex {
+  width: 40px;
+  height: 44px;
+  flex: none;
 }
 
-.residence-overlay-bottom {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 10;
-  pointer-events: none;
-}
-
-.residence-overlay-bottom > * {
-  pointer-events: auto;
-}
-
-.residence-info-panel {
-  background: var(--cream-50, #fafaf7);
-  border-top: 1px solid var(--line);
-  padding: 10px 14px;
+.residence-selection-detail {
+  min-width: 0;
   display: grid;
-  gap: 8px;
+  gap: 2px;
 }
 
-/* 凡例 */
+.residence-selection-reso {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.residence-selection-code {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--sage-900);
+  overflow-wrap: anywhere;
+}
+
+/* 未選択時の誘導カード */
+.residence-selection-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: oklch(0.98 0.008 145 / 0.5);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+}
+
+.residence-selection-empty .residence-selection-hex {
+  width: 24px;
+  height: 26px;
+}
+
+.residence-selection-empty span {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+/* 凡例カード（左レール） */
+.residence-legend-card {
+  display: grid;
+  gap: 10px;
+  padding: 2px 4px;
+}
+
 .residence-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 20px;
+  flex-direction: column;
+  gap: 9px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2682,22 +2749,22 @@ h4 {
 .residence-legend-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--ink-faint);
+  gap: 9px;
+  font-size: 12.5px;
+  color: var(--ink-muted);
 }
 
 .residence-legend-swatch {
   display: inline-block;
-  width: 18px;
-  height: 12px;
+  width: 20px;
+  height: 13px;
   border-radius: 3px;
   flex-shrink: 0;
 }
 
 /* swatch 種別: 枠線スタイルで色覚によらず判別可能にする */
 .swatch-solid-bold {
-  border: 3.5px solid #2f5d3a;
+  border: 3px solid #2f5d3a;
   background: oklch(0.62 0.08 145 / 0.45);
 }
 
@@ -2711,45 +2778,122 @@ h4 {
   background: oklch(0.78 0.01 220 / 0.25);
 }
 
-/* 確定パネル */
-.residence-action-panel {
-  padding: 16px 0 0;
-  display: grid;
-  gap: 12px;
+/* レール内の補助注記（worker 未設定など） */
+.residence-rail-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-faint);
 }
 
-/* ボトムシート ハンドル（モバイル時に表示・デスクトップでは非表示） */
-.residence-sheet-handle {
-  display: none;
+/* プライバシー注記（左レール最下段） */
+.residence-privacy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 11px 13px;
+  background: oklch(0.95 0.015 145 / 0.5);
+  border-radius: var(--radius-md);
+  color: var(--sage-700);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.residence-privacy-note svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+}
+
+/* 地図パネル（右カラム）: 枠付き・角丸のカードに地図を収める。 */
+.residence-map-panel {
+  grid-area: map;
+  position: relative;
+  overflow: hidden;
+  height: 320px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  background: var(--surface-soft);
+}
+
+@media (min-width: 880px) {
+  .residence-map-panel {
+    align-self: stretch;
+    height: 100%;
+    min-height: 520px;
+  }
+}
+
+.residence-map-panel .residence-map-canvas {
+  display: block;
   width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+
+.residence-map-panel .residence-map-fallback {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+}
+
+/* タップ誘導チップ（左上） */
+.residence-map-hint {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 10;
+  display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-}
-
-.residence-sheet-handle-bar {
-  display: block;
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--line-strong, #ccc);
-  margin: 0 auto 6px;
-}
-
-.residence-sheet-title {
-  font-size: 14px;
+  padding: 8px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: oklch(0.99 0.005 95 / 0.92);
+  box-shadow: 0 4px 14px oklch(0.35 0.04 145 / 0.1);
+  backdrop-filter: blur(6px);
+  font-size: 13px;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--sage-800);
 }
 
-/* step-stage: picker と action-panel を縦に並べる土台 */
-.residence-step-stage {
-  display: grid;
-  gap: 0;
+.residence-map-hint-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sage-600);
+  animation: residencePulse 1.8s ease-in-out infinite;
+}
+
+@keyframes residencePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* 一時通知トースト（下部中央）: 海セル/現在地エラーなど */
+.residence-map-toast {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  z-index: 11;
+  max-width: calc(100% - 32px);
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--sage-900);
+  color: var(--cream-50);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  transform: translateX(-50%);
+  box-shadow: 0 6px 18px oklch(0.35 0.04 145 / 0.25);
 }
 
 .member-route-panel {
@@ -3256,131 +3400,39 @@ h4 {
 }
 
 /*
- * residence ステップのフルブリード modifier。
- * .wizard-shell / .page / .wizard-stage の本体ルールは変更せず、
- * このセレクタ配下でのみ制約を打ち消す。
- * アクティブな residence ステップに付与されるため、退避中（wizard-step-inactive）には
- * 付かず、他ステップや遷移中レイアウトに影響しない。
+ * residence ステップの contained ワイドレイアウト modifier。
+ * .wizard-shell (max-width: 720px) より広い 2カラムを見せるため、中央寄せした
+ * まま最大 1080px まで breakout する（フルブリードにはせず、枠の中に収める）。
+ * .wizard-shell / .page / .wizard-stage の本体ルールは変更せず、このセレクタ配下
+ * でのみ幅を広げる。アクティブな residence ステップにのみ付与するため、退避中
+ * （wizard-step-inactive）や他ステップ・遷移中レイアウトには影響しない。
  */
-.wizard-step-content--fullbleed {
-  /* .wizard-shell (max-width: 720px) と .page (max-width: var(--container), padding) を視覚的に突破する。
-     width を 100dvw にし margin-left で中央から左端まで引き戻す breakout 手法。 */
-  width: 100dvw;
-  margin-left: calc(50% - 50dvw);
-  gap: 0;
+.wizard-step-content--residence {
+  gap: 24px;
 }
 
-/* フルブリード時: heading を地図の上部に収める（gap なし） */
-.wizard-step-content--fullbleed .wizard-heading {
-  padding: 16px 28px 12px;
-  max-width: 720px;
-  margin: 0 auto;
-  width: 100%;
+/* デスクトップ(≥880px)でのみ breakout。モバイルは通常の shell 幅・1カラムのまま、
+   他ステップと左右マージンをそろえる。 */
+@media (min-width: 880px) {
+  .wizard-step-content--residence {
+    width: min(1080px, calc(100dvw - 32px));
+    margin-left: calc(50% - min(540px, 50dvw - 16px));
+  }
 }
 
-/* フルブリード時: 地図 stage を全幅に広げ、高さを dvh ベースへ変更する */
-.wizard-step-content--fullbleed .residence-step-stage {
-  width: 100%;
+/* 確定操作（エラー・CTA・ヒント）。contained 幅の下部に上罫線付きで配置する。 */
+.residence-cta {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
 }
 
-/* フルブリード時: 地図 canvas をビューポートの大部分へ拡張する。
-   ヘッダ(60px想定) + プログレス(68px想定) + heading(~80px) で計208px
-   + 通常フロー検索バー(~80px: padding/label/hint/gap 含む) で計288pxを引く。 */
-.wizard-step-content--fullbleed .residence-map-stage .residence-map-canvas {
-  height: calc(100dvh - 288px);
-  min-height: 320px;
-}
-
-/* フルブリード時: 確定パネルは wizard-shell 幅に収める */
-.wizard-step-content--fullbleed .residence-action-panel {
-  max-width: 720px;
-  margin: 0 auto;
-  width: 100%;
-  padding: 16px 28px 0;
-}
-
-/* フルブリード時: オーバーレイコンテナは pointer-events: none で地図のタッチを通す。
-   内部の操作要素（ボタン・入力・パネル本体）は pointer-events: auto で操作可能にする。 */
-.wizard-step-content--fullbleed .residence-overlay-top,
-.wizard-step-content--fullbleed .residence-overlay-bottom {
-  pointer-events: none;
-}
-
-.wizard-step-content--fullbleed .residence-overlay-top > *,
-.wizard-step-content--fullbleed .residence-overlay-bottom > * {
-  pointer-events: auto;
-}
-
-/* フルブリード かつ モバイル（≤620px）: 確定パネルをボトムシートとして画面下部に固定 */
-@media (max-width: 620px) {
-  .wizard-step-content--fullbleed .residence-action-panel {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 20;
-    max-width: 100%;
-    margin: 0;
-    padding: 0 0 env(safe-area-inset-bottom, 0px);
-    background: var(--cream-50, #fafaf7);
-    border-top: 1px solid var(--line);
-    border-radius: 12px 12px 0 0;
-    box-shadow: 0 -4px 16px oklch(0.35 0.04 145 / 0.12);
-    overflow: hidden;
-    transition: max-height 0.3s ease;
-    /* is-collapsed / is-expanded で高さを切り替える */
-  }
-
-  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed {
-    max-height: 68px;
-    overflow: hidden;
-  }
-
-  .wizard-step-content--fullbleed .residence-action-panel.is-expanded {
-    max-height: 80dvh;
-    overflow-y: auto;
-  }
-
-  /* 折りたたみ時はハンドルだけ見えるようにする */
-  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .control-group,
-  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .field-note,
-  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .wizard-cta-bar,
-  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .hint-text {
-    display: none;
-  }
-
-  /* 展開時のパネル内コンテンツに padding を確保 */
-  .wizard-step-content--fullbleed .residence-action-panel.is-expanded .control-group,
-  .wizard-step-content--fullbleed .residence-action-panel.is-expanded .wizard-cta-bar {
-    padding: 0 16px;
-  }
-
-  /* ハンドルを表示（モバイルのみ） */
-  .wizard-step-content--fullbleed .residence-sheet-handle {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 8px 16px 4px;
-  }
-
-  /* 折りたたみ時のシートが地図に重ならないよう canvas 下部に余白を確保 */
-  .wizard-step-content--fullbleed .residence-map-stage .residence-map-canvas {
-    height: calc(100dvh - 288px - 68px);
-    min-height: 240px;
-  }
-
-  /* 情報パネルをモバイルで最小化（1行コンパクト表示） */
-  .wizard-step-content--fullbleed .residence-info-panel {
-    padding: 6px 10px;
-    gap: 4px;
-  }
-
-  /* 凡例をモバイルで横スクロール可能に（折り返しを減らす） */
-  .wizard-step-content--fullbleed .residence-legend {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    gap: 8px 12px;
-    padding-bottom: 2px;
+/* デスクトップは CTA を右寄せにする（モバイルは既存の wizard-cta-bar ルールに従う）。 */
+@media (min-width: 880px) {
+  .residence-cta .wizard-cta-bar {
+    justify-content: flex-end;
   }
 }
 

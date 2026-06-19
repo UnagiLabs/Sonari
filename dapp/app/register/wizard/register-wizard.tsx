@@ -181,10 +181,9 @@ export function RegisterWizard() {
                 const residenceReadyToSave = state.selectedCellDecimal !== null;
                 return (
                     <ResidenceStep
+                        active={activeStep === "residence"}
                         canContinue={residenceReadyToSave}
-                        fullbleed={activeStep === "residence"}
                         saveError={residenceSaveError}
-                        selectedCellDecimal={state.selectedCellDecimal}
                         onBack={goBack}
                         onCellSelectionChange={handleCellSelectionChange}
                         onNext={handleResidenceNext}

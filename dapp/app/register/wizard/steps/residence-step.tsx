@@ -1,21 +1,14 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
 import { ResidenceCellPicker } from "../../residence/residence-cell-picker";
-import {
-    initialSheetState,
-    sheetStateAfterSelection,
-    toggleSheet,
-} from "../../residence/residence-sheet";
 import type { ResidenceSaveErrorCode } from "../residence-save";
 
 interface ResidenceStepProps {
     readonly canContinue: boolean;
-    /** true のとき residence ステップがアクティブ。フルブリード CSS modifier を付与する。 */
-    readonly fullbleed?: boolean;
+    /** true のとき residence ステップがアクティブ。contained な専用ワイドレイアウト modifier を付与する。 */
+    readonly active?: boolean;
     readonly saveError: ResidenceSaveErrorCode | null;
-    readonly selectedCellDecimal: string | null;
     readonly onCellSelectionChange: (decimal: string | null) => void;
     readonly onBack: () => void;
     readonly onNext: () => void;
@@ -23,24 +16,14 @@ interface ResidenceStepProps {
 
 export function ResidenceStep({
     canContinue,
-    fullbleed = false,
+    active = false,
     saveError,
-    selectedCellDecimal,
     onCellSelectionChange,
     onBack,
     onNext,
 }: ResidenceStepProps) {
     const t = useTranslations("register.wizard.residence");
     const tCommon = useTranslations("register.wizard.common");
-
-    const [sheetState, setSheetState] = useState(initialSheetState);
-
-    // セル選択が null→非null に変わったとき自動展開する。
-    useEffect(() => {
-        if (selectedCellDecimal !== null) {
-            setSheetState((prev) => sheetStateAfterSelection(prev));
-        }
-    }, [selectedCellDecimal]);
 
     function saveErrorMessage(): string | null {
         if (saveError === "cell_not_selected") return t("saveError.cellNotSelected");
@@ -49,69 +32,49 @@ export function ResidenceStep({
     }
 
     const errorMessage = saveErrorMessage();
-    const isExpanded = sheetState === "expanded";
 
-    const sectionClassName = fullbleed
-        ? "wizard-step-content wizard-step-content--fullbleed"
+    const sectionClassName = active
+        ? "wizard-step-content wizard-step-content--residence"
         : "wizard-step-content";
 
     return (
         <section aria-labelledby="wizard-residence-title" className={sectionClassName}>
             <header className="wizard-heading">
-                <div className="eyebrow">{t("eyebrow")}</div>
                 <h1 className="wizard-title" id="wizard-residence-title">
                     {t("title")}
                 </h1>
                 <p className="wizard-lead">{t("lead")}</p>
             </header>
 
-            <div className="residence-step-stage">
-                {/* 地図＋オーバーレイ（背景層） */}
-                <ResidenceCellPicker onSelectionChange={onCellSelectionChange} />
+            {/* 地図＋左レール（検索・選択中エリア・凡例・プライバシー注記） */}
+            <ResidenceCellPicker onSelectionChange={onCellSelectionChange} />
 
-                {/* 確定パネル（前景層）: チェックボックス・エラー・CTA */}
-                <div
-                    className={`residence-action-panel ${isExpanded ? "is-expanded" : "is-collapsed"}`}
-                >
-                    {/* ボトムシート ハンドル */}
+            {/* 確定操作: エラー・CTA・ヒントを contained 幅の下部に通常フローで配置 */}
+            <div className="residence-cta">
+                {errorMessage !== null ? (
+                    <div className="field-note" role="alert">
+                        <small>{errorMessage}</small>
+                    </div>
+                ) : null}
+
+                <div className="wizard-cta-bar">
+                    <button className="btn btn-ghost btn-lg" onClick={onBack} type="button">
+                        {tCommon("back")}
+                    </button>
                     <button
-                        aria-expanded={isExpanded}
-                        className="residence-sheet-handle"
-                        onClick={() => setSheetState(toggleSheet)}
+                        className="btn btn-primary btn-lg wizard-cta"
+                        disabled={!canContinue}
+                        onClick={onNext}
                         type="button"
                     >
-                        <span className="residence-sheet-handle-bar" />
-                        <span className="residence-sheet-title">{t("sheet.title")}</span>
-                        <span className="sr-only">
-                            {isExpanded ? t("sheet.collapse") : t("sheet.expand")}
-                        </span>
+                        {tCommon("next")}
                     </button>
-
-                    {errorMessage !== null ? (
-                        <div className="field-note" role="alert">
-                            <small>{errorMessage}</small>
-                        </div>
-                    ) : null}
-
-                    <div className="wizard-cta-bar">
-                        <button className="btn btn-ghost btn-lg" onClick={onBack} type="button">
-                            {tCommon("back")}
-                        </button>
-                        <button
-                            className="btn btn-primary btn-lg wizard-cta"
-                            disabled={!canContinue}
-                            onClick={onNext}
-                            type="button"
-                        >
-                            {tCommon("next")}
-                        </button>
-                    </div>
-                    {!canContinue ? (
-                        <p className="wizard-cta-hint" role="note">
-                            {t("nextHint")}
-                        </p>
-                    ) : null}
                 </div>
+                {!canContinue ? (
+                    <p className="wizard-cta-hint" role="note">
+                        {t("nextHint")}
+                    </p>
+                ) : null}
             </div>
         </section>
     );

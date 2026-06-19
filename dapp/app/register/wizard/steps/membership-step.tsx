@@ -330,7 +330,6 @@ export function MembershipStep({
     return (
         <section aria-labelledby="wizard-membership-title" className="wizard-step-content">
             <header className="wizard-heading">
-                <div className="eyebrow">{t("eyebrow")}</div>
                 <h1 className="wizard-title" id="wizard-membership-title">
                     {t("title")}
                 </h1>

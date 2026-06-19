@@ -22,7 +22,6 @@ export function ConsentStep({
     return (
         <section aria-labelledby="wizard-consent-title" className="wizard-step-content">
             <header className="wizard-heading">
-                <div className="eyebrow">{t("eyebrow")}</div>
                 <h1 className="wizard-title" id="wizard-consent-title">
                     {t("title")}
                 </h1>
