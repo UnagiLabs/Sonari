@@ -160,6 +160,18 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         expect(() =>
             buildAwsSonariVerifierRunnerDeployPlan({
                 ...validInput,
+                residenceTileManifestKey: "residence/v1/$(touch owned).json",
+            }),
+        ).toThrow("Invalid residence tile manifest key");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                residenceTileManifestKey: "residence/v1/tile\nmanifest.json",
+            }),
+        ).toThrow("Invalid residence tile manifest key");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
                 residenceTileManifestKey: "other/tile_manifest.json",
             }),
         ).toThrow("residence tile manifest key must start");
@@ -167,6 +179,12 @@ describe("AWS Sonari verifier runner deploy plan", () => {
             buildAwsSonariVerifierRunnerDeployPlan({
                 ...validInput,
                 residenceR2ObjectPrefix: "../residence",
+            }),
+        ).toThrow("Invalid residence R2 object prefix");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                residenceR2ObjectPrefix: "residence/v1`id`",
             }),
         ).toThrow("Invalid residence R2 object prefix");
         expect(() =>

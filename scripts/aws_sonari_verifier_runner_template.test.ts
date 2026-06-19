@@ -409,6 +409,15 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("ResidenceTileManifestSha256:");
         expect(template).toContain("ResidenceRoot:");
         expect(template).toContain("GeoResolution:");
+        expect(template).toContain(
+            'ResidenceTileManifestKey:\n    Type: String\n    AllowedPattern: "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"',
+        );
+        expect(template).toContain(
+            'ResidenceR2ObjectPrefix:\n    Type: String\n    AllowedPattern: "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"',
+        );
+        expect(template).toContain(
+            'ResidenceR2Bucket:\n    Type: String\n    AllowedPattern: "^[A-Za-z0-9][A-Za-z0-9._-]{1,61}[A-Za-z0-9]$"',
+        );
         expect(template).toContain("SONARI_RESIDENCE_R2_BASE_URL");
         expect(template).toContain("SONARI_RESIDENCE_TILE_MANIFEST_KEY");
         expect(template).toContain("SONARI_RESIDENCE_TILE_MANIFEST_SHA256");
@@ -512,6 +521,18 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain('echo "bad ResidenceR2BaseUrl"');
         expect(template).toContain("{address: 127.0.0.1, port: 18081}");
         expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080");
+        expect(template).toContain(
+            "printf 'SONARI_RESIDENCE_TILE_MANIFEST_KEY=%q\\n' '$" + "{ResidenceTileManifestKey}'",
+        );
+        expect(template).toContain(
+            "printf 'SONARI_RESIDENCE_R2_OBJECT_PREFIX=%q\\n' '$" + "{ResidenceR2ObjectPrefix}'",
+        );
+        expect(template).not.toContain(
+            'echo "SONARI_RESIDENCE_TILE_MANIFEST_KEY=$' + '{ResidenceTileManifestKey}"',
+        );
+        expect(template).not.toContain(
+            'echo "SONARI_RESIDENCE_R2_OBJECT_PREFIX=$' + '{ResidenceR2ObjectPrefix}"',
+        );
         expect(template).not.toContain("CLOUDFLARE_API_TOKEN");
         expect(template).not.toContain("CF_API_TOKEN");
         expect(template).not.toContain("walrus_aggregator_host");

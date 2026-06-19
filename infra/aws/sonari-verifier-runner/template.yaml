@@ -126,6 +126,7 @@ Parameters:
     Description: Public HTTPS base URL for residence tile manifest and tile objects in Cloudflare R2.
   ResidenceTileManifestKey:
     Type: String
+    AllowedPattern: "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"
     Description: R2 object key for the residence tile_manifest.json.
   ResidenceTileManifestSha256:
     Type: String
@@ -133,9 +134,11 @@ Parameters:
     Description: SHA-256 hex digest computed from the exact tile_manifest.json bytes uploaded to R2.
   ResidenceR2ObjectPrefix:
     Type: String
+    AllowedPattern: "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"
     Description: R2 object prefix containing the residence manifest and tile objects.
   ResidenceR2Bucket:
     Type: String
+    AllowedPattern: "^[A-Za-z0-9][A-Za-z0-9._-]{1,61}[A-Za-z0-9]$"
     Description: R2 bucket name recorded in the residence tile manifest metadata.
   ResidenceAllowlistVersion:
     Type: Number
@@ -792,9 +795,9 @@ Resources:
               echo "SONARI_WALRUS_N_SHARDS=1000"
               echo "SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080"
               printf 'SONARI_RESIDENCE_R2_BASE_URL=%q\n' "$residence_r2_base_url"
-              echo "SONARI_RESIDENCE_TILE_MANIFEST_KEY=${ResidenceTileManifestKey}"
+              printf 'SONARI_RESIDENCE_TILE_MANIFEST_KEY=%q\n' '${ResidenceTileManifestKey}'
               echo "SONARI_RESIDENCE_TILE_MANIFEST_SHA256=${ResidenceTileManifestSha256}"
-              echo "SONARI_RESIDENCE_R2_OBJECT_PREFIX=${ResidenceR2ObjectPrefix}"
+              printf 'SONARI_RESIDENCE_R2_OBJECT_PREFIX=%q\n' '${ResidenceR2ObjectPrefix}'
               echo "SONARI_RESIDENCE_R2_BUCKET=${ResidenceR2Bucket}"
               echo "SONARI_RESIDENCE_ALLOWLIST_VERSION=${ResidenceAllowlistVersion}"
               echo "SONARI_GEO_RESOLUTION=${GeoResolution}"

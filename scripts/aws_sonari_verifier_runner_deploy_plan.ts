@@ -19,6 +19,7 @@ const DEFAULT_WORLD_ID_PROOF_MODE = "real";
 const DEFAULT_WORLD_ID_ACTION = "sonari_membership_register_v2";
 const DEFAULT_NITRO_ENCLAVE_MEMORY_MIB = 4096;
 const DEFAULT_SCHEDULE_EXPRESSION = "cron(0 0,12 * * ? *)";
+const RELATIVE_R2_OBJECT_PATH_PATTERN = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/u;
 const DEPLOY_PARAMETER_KEYS = [
     "LambdaCodeS3Bucket",
     "LambdaCodeS3Key",
@@ -270,11 +271,11 @@ function validateR2Bucket(value: string, label: string): string {
 }
 
 function validateRelativeObjectKey(value: string, label: string): string {
-    const trimmed = value.trim().replace(/^\/+/u, "");
+    const trimmed = value.trim();
     if (
         trimmed.length === 0 ||
         trimmed.length > 1024 ||
-        trimmed.endsWith("/") ||
+        !RELATIVE_R2_OBJECT_PATH_PATTERN.test(trimmed) ||
         trimmed
             .split("/")
             .some((segment) => segment.length === 0 || segment === "." || segment === "..")
@@ -285,10 +286,11 @@ function validateRelativeObjectKey(value: string, label: string): string {
 }
 
 function validateRelativeObjectPrefix(value: string, label: string): string {
-    const trimmed = value.trim().replace(/^\/+|\/+$/gu, "");
+    const trimmed = value.trim();
     if (
         trimmed.length === 0 ||
         trimmed.length > 1024 ||
+        !RELATIVE_R2_OBJECT_PATH_PATTERN.test(trimmed) ||
         trimmed
             .split("/")
             .some((segment) => segment.length === 0 || segment === "." || segment === "..")
