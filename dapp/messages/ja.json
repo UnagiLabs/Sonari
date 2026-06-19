@@ -701,10 +701,6 @@
                 "label": "利用可能",
                 "meta": "即時に支払い可能"
             },
-            "reservedFloor": {
-                "label": "確保（フロア）",
-                "meta": "Main pool の床払い確保分"
-            },
             "confirmedEvents": {
                 "label": "確定イベント",
                 "meta": "署名検証済みの情報源"

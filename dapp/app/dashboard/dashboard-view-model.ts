@@ -6,7 +6,6 @@ import type { DashboardDisasterEvent, StatusKey } from "./dashboard-events";
 export type DashboardMetricKey =
     | "totalBalance"
     | "availableNow"
-    | "reservedFloor"
     | "confirmedEvents";
 export type DashboardPoolKey = "main" | "operations" | "earthquake";
 
@@ -45,7 +44,6 @@ export interface DashboardViewModel {
 const METRIC_KEYS: readonly DashboardMetricKey[] = [
     "totalBalance",
     "availableNow",
-    "reservedFloor",
     "confirmedEvents",
 ] as const;
 
@@ -85,7 +83,6 @@ export function deriveDashboardViewModel(input: {
         metricValues: {
             totalBalance: formatUsdc(totalBalance, input.locale),
             availableNow: formatUsdc(availableNow, input.locale),
-            reservedFloor: formatUsdc(input.pools.main.reserveFloorUsdc, input.locale),
             confirmedEvents: formatAmount(confirmedEvents, input.locale),
         },
         pools: deriveFeaturedPools(input.pools, input.locale),

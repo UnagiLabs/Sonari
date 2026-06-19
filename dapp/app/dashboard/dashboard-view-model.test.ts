@@ -54,13 +54,11 @@ describe("deriveDashboardViewModel", () => {
         expect(view.metricKeys).toEqual([
             "totalBalance",
             "availableNow",
-            "reservedFloor",
             "confirmedEvents",
         ]);
         expect(view.metricValues).toEqual({
             totalBalance: "$20", // main 12 + earthquake 8
             availableNow: "$19", // (12 - 1) + 8
-            reservedFloor: "$1", // main reserve floor
             confirmedEvents: "1", // finalized event present
         });
 
