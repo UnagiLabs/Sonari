@@ -4145,14 +4145,22 @@ h4 {
 }
 
 .wizard-path-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 13px 2px;
 }
 
-.wizard-path-item + .wizard-path-item {
-  border-top: 1px solid var(--line);
+/* 区切り線は番号サークル（26px）＋gap（14px）の右、テキスト先頭に揃えてインデントする。 */
+.wizard-path-item + .wizard-path-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 40px;
+  right: 0;
+  height: 1px;
+  background: var(--line);
 }
 
 .wizard-path-number {
@@ -4229,8 +4237,14 @@ h4 {
   height: 11px;
 }
 
-/* sponsor note：ガス代肩代わりの説明をサージュ淡色で強調する。 */
-.wizard-sponsor-note {
+/*
+ * connect panel 内のステータスノート。状態で出し分ける 2 種を共通レイアウトにする。
+ * - sponsor note：未登録ウォレットへガス代肩代わりを説明する。
+ * - member note：登録済みウォレットへ「更新へ進める」案内をする。
+ * いずれもサージュ淡色のチップとして本文を強調し、太字リードで結論を先頭に置く。
+ */
+.wizard-sponsor-note,
+.wizard-member-note {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -4247,6 +4261,19 @@ h4 {
   flex: none;
   width: 15px;
   height: 15px;
+  color: var(--sage-700);
+}
+
+.wizard-member-note .wizard-hex-check {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--sage-700);
+}
+
+/* 太字リード（「ガス代は不要。」「メンバーシップ SBT 有効。」）。 */
+.wizard-note-lead {
+  font-weight: 700;
   color: var(--sage-700);
 }
 
