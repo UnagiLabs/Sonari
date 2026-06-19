@@ -1,4 +1,7 @@
 use crate::GEO_RESOLUTION;
+use crate::core::artifacts::AffectedCellJson;
+use crate::core::processing::{AffectedCellLandClassifier, LandClassification};
+use crate::core::types::OracleError;
 use crate::crypto::{sha256_bytes, to_hex};
 use h3o::{CellIndex, Resolution};
 use serde::Deserialize;
@@ -197,6 +200,66 @@ impl ResidenceTileSet {
     pub fn is_land_cell(&self, h3_index: u64) -> bool {
         self.tiles.iter().any(|tile| tile.cells.contains(&h3_index))
     }
+
+    pub fn land_cell_count_for(
+        &self,
+        affected_cells: &[AffectedCellJson],
+    ) -> Result<u64, ResidenceTileError> {
+        let mut land_count = 0u64;
+        for cell in affected_cells {
+            let h3_index = parse_h3_index(
+                "affected cell h3_index",
+                &cell.h3_index,
+                self.manifest.geo_resolution,
+            )?;
+            if self.is_land_cell(h3_index) {
+                land_count = land_count.checked_add(1).ok_or_else(|| {
+                    ResidenceTileError::InvalidArtifact("land cell count overflow".to_owned())
+                })?;
+            }
+        }
+        Ok(land_count)
+    }
+}
+
+pub struct ResidenceTileClassifier<'a, S: ResidenceTileSource> {
+    config: &'a ResidenceTileConfig,
+    source: &'a S,
+}
+
+impl<'a, S: ResidenceTileSource> ResidenceTileClassifier<'a, S> {
+    pub fn new(config: &'a ResidenceTileConfig, source: &'a S) -> Self {
+        Self { config, source }
+    }
+}
+
+impl<S: ResidenceTileSource> AffectedCellLandClassifier for ResidenceTileClassifier<'_, S> {
+    fn classify(
+        &self,
+        affected_cells: &[AffectedCellJson],
+    ) -> Result<LandClassification, OracleError> {
+        let required_parents =
+            required_parent_h3_indexes(affected_cells, self.config.geo_resolution)?;
+        let tile_set = ResidenceTileSet::load(self.config, self.source, &required_parents)?;
+        let land_cell_count = tile_set.land_cell_count_for(affected_cells)?;
+        let total_cell_count = u64::try_from(affected_cells.len()).map_err(|_| {
+            OracleError::ResidenceTiles("affected cell count exceeds u64 range".to_owned())
+        })?;
+        let water_cell_count = total_cell_count
+            .checked_sub(land_cell_count)
+            .ok_or_else(|| {
+                OracleError::ResidenceTiles("land cell count exceeds total cell count".to_owned())
+            })?;
+        Ok(LandClassification {
+            total_cell_count,
+            land_cell_count,
+            water_cell_count,
+            allowlist_version: self.config.allowlist_version,
+            allowlist_root: self.config.merkle_root.clone(),
+            allowlist_source_hash: self.config.source_hash.clone(),
+            classifier: RESIDENCE_TILE_CLASSIFIER_NAME.to_owned(),
+        })
+    }
 }
 
 pub trait ResidenceTileSource {
@@ -239,6 +302,37 @@ pub enum ResidenceTileError {
     Fetch(String),
     #[error("invalid residence tile artifact: {0}")]
     InvalidArtifact(String),
+}
+
+impl From<ResidenceTileError> for OracleError {
+    fn from(error: ResidenceTileError) -> Self {
+        Self::ResidenceTiles(error.to_string())
+    }
+}
+
+pub fn required_parent_h3_indexes(
+    affected_cells: &[AffectedCellJson],
+    geo_resolution: u8,
+) -> Result<Vec<u64>, ResidenceTileError> {
+    let parent_resolution = resolution_from_u8(RESIDENCE_TILE_PARENT_RESOLUTION)?;
+    let mut parents = Vec::with_capacity(affected_cells.len());
+    for cell in affected_cells {
+        let h3_index = parse_h3_index("affected cell h3_index", &cell.h3_index, geo_resolution)?;
+        let cell_index = CellIndex::try_from(h3_index).map_err(|error| {
+            ResidenceTileError::InvalidArtifact(format!(
+                "affected cell {h3_index} is not a valid H3 cell: {error}"
+            ))
+        })?;
+        let parent = cell_index.parent(parent_resolution).ok_or_else(|| {
+            ResidenceTileError::InvalidArtifact(format!(
+                "could not compute parent for affected cell {h3_index}"
+            ))
+        })?;
+        parents.push(u64::from(parent));
+    }
+    parents.sort_unstable();
+    parents.dedup();
+    Ok(parents)
 }
 
 fn parse_manifest_bytes(

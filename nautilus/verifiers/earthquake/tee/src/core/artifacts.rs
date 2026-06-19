@@ -85,6 +85,14 @@ pub struct EvidenceAffectedCells {
     pub hash: String,
     pub root: String,
     pub count: u64,
+    pub total_cell_count: u64,
+    pub land_cell_count: u64,
+    pub water_cell_count: u64,
+    pub land_allowlist_version: u64,
+    pub land_allowlist_root: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub land_allowlist_source_hash: Option<String>,
+    pub land_classifier: String,
     pub geo_resolution: u8,
 }
 

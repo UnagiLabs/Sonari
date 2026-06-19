@@ -19,9 +19,9 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use tee::server::{EGRESS_PROXY_URL_KEY, EarthquakeProcessHandler};
 use tee::{
-    DEFAULT_WALRUS_CLI_TIMEOUT_MS, OracleOutput, UsgsOracleInput, WalrusCliSourceArchive,
-    WalrusCliSourceArchiveConfig, canonical_json_bytes, grid_xml_from_artifact,
-    parse_command_timeout_ms, parse_n_shards, process_usgs_with_signer,
+    DEFAULT_WALRUS_CLI_TIMEOUT_MS, OracleOutput, ResidenceTileConfig, UsgsOracleInput,
+    WalrusCliSourceArchive, WalrusCliSourceArchiveConfig, canonical_json_bytes,
+    grid_xml_from_artifact, parse_command_timeout_ms, parse_n_shards, process_usgs_with_signer,
     process_usgs_with_source_archive,
 };
 
@@ -168,6 +168,7 @@ struct EnclaveState {
     signing_key_seed: [u8; 32],
     ctx: TeeContext,
     archive_config: Option<WalrusCliSourceArchiveConfig>,
+    residence_tile_config: Option<ResidenceTileConfig>,
 }
 
 fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -181,6 +182,7 @@ fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error
         signing_key_seed,
         ctx: tee_context_from_env(),
         archive_config: WalrusCliSourceArchiveConfig::from_env().ok(),
+        residence_tile_config: ResidenceTileConfig::from_env().ok(),
     };
     let listener = VsockListener::bind(args.port)?;
     eprintln!(
@@ -219,9 +221,15 @@ fn tee_context_from_env() -> TeeContext {
 /// shard count is absent on a non-finalized path) the handler is built without
 /// it and fails closed only when a finalized result actually needs to archive.
 fn earthquake_handler_from_env() -> EarthquakeProcessHandler {
-    match WalrusCliSourceArchiveConfig::from_env() {
-        Ok(config) => EarthquakeProcessHandler::with_archive_config(config),
-        Err(_) => EarthquakeProcessHandler::new(),
+    match (
+        WalrusCliSourceArchiveConfig::from_env(),
+        ResidenceTileConfig::from_env(),
+    ) {
+        (Ok(archive_config), Ok(residence_tile_config)) => {
+            EarthquakeProcessHandler::with_runtime_configs(archive_config, residence_tile_config)
+        }
+        (Ok(config), Err(_)) => EarthquakeProcessHandler::with_archive_config(config),
+        _ => EarthquakeProcessHandler::new(),
     }
 }
 
@@ -242,9 +250,18 @@ fn route_request(
         }
         ("POST", "/process_data") => {
             let envelope = parse_process_data_envelope(&request.body)?;
-            let handler = match state.archive_config.clone() {
-                Some(config) => EarthquakeProcessHandler::with_archive_config(config),
-                None => EarthquakeProcessHandler::new(),
+            let handler = match (
+                state.archive_config.clone(),
+                state.residence_tile_config.clone(),
+            ) {
+                (Some(archive_config), Some(residence_tile_config)) => {
+                    EarthquakeProcessHandler::with_runtime_configs(
+                        archive_config,
+                        residence_tile_config,
+                    )
+                }
+                (Some(config), None) => EarthquakeProcessHandler::with_archive_config(config),
+                _ => EarthquakeProcessHandler::new(),
             };
             let output = handler
                 .process(&serde_json::to_vec(&envelope.payload)?, &state.ctx)
@@ -758,6 +775,13 @@ mod tests {
                 hash: format!("0x{}", "66".repeat(32)),
                 root: format!("0x{}", "44".repeat(32)),
                 count: 1,
+                total_cell_count: 1,
+                land_cell_count: 1,
+                water_cell_count: 0,
+                land_allowlist_version: 0,
+                land_allowlist_root: format!("0x{}", "00".repeat(32)),
+                land_allowlist_source_hash: None,
+                land_classifier: "all_affected_cells_land_compat_v1".to_owned(),
                 geo_resolution: 7,
             },
         }

@@ -26,6 +26,8 @@ pub enum OracleError {
     Zip(String),
     #[error("invalid Worker to TEE request: {0}")]
     WorkerRequest(String),
+    #[error("invalid residence tile verification: {0}")]
+    ResidenceTiles(String),
     #[error("arithmetic overflow: {0}")]
     Overflow(String),
 }
