@@ -300,7 +300,22 @@
     },
     "mypage": {
         "title": "My Page",
+        "eyebrow": "Member area",
         "subtitle": "Review the contents of your MembershipPass.",
+        "pass": {
+            "kicker": "Membership",
+            "name": "Soulbound pass",
+            "subtitle": "Non-transferable · bound to your wallet",
+            "residenceLabel": "Residence cell",
+            "walletLabel": "Wallet",
+            "walletPlaceholder": "Not connected",
+            "networkLabel": "Network",
+            "networkValue": "Sui"
+        },
+        "quick": {
+            "passStateLabel": "Pass state",
+            "identityLabel": "Identity"
+        },
         "claim": {
             "heading": "Receive relief",
             "body": "When relief is active for a disaster you may be affected by, you can check your eligibility and receive it here.",
@@ -346,8 +361,11 @@
         },
         "status": {
             "heading": "Pass status",
+            "onchainEyebrow": "Pass status · recorded on-chain",
             "stateLabel": "State",
-            "issuedAtLabel": "Issued on"
+            "issuedAtLabel": "Issued on",
+            "networkLabel": "Network",
+            "networkValue": "Sui"
         },
         "statusLabels": {
             "active": "Active",
