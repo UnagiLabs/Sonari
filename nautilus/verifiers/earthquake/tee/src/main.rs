@@ -415,14 +415,65 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
         "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
         &config.egress_proxy_url,
     );
+    set_env_before_server(
+        "SONARI_RESIDENCE_R2_BASE_URL",
+        &config.residence_r2_base_url,
+    );
+    set_env_before_server(
+        "SONARI_RESIDENCE_TILE_MANIFEST_KEY",
+        &config.residence_tile_manifest_key,
+    );
+    set_env_before_server(
+        "SONARI_RESIDENCE_TILE_MANIFEST_SHA256",
+        &config.residence_tile_manifest_sha256,
+    );
+    set_env_before_server(
+        "SONARI_RESIDENCE_R2_OBJECT_PREFIX",
+        &config.residence_r2_object_prefix,
+    );
+    set_env_before_server("SONARI_RESIDENCE_R2_BUCKET", &config.residence_r2_bucket);
+    set_env_before_server(
+        "SONARI_RESIDENCE_ALLOWLIST_VERSION",
+        &config.residence_allowlist_version,
+    );
+    set_env_before_server("SONARI_GEO_RESOLUTION", &config.geo_resolution);
+    set_env_before_server("SONARI_RESIDENCE_ROOT", &config.residence_root);
+    if let Some(source_hash) = config
+        .residence_source_hash
+        .as_ref()
+        .filter(|value| !value.is_empty())
+    {
+        set_env_before_server("SONARI_RESIDENCE_SOURCE_HASH", source_hash);
+    }
     Ok(())
 }
 
 #[derive(Debug, Deserialize)]
 struct BootstrapConfig {
+    #[serde(rename = "w", alias = "walrus_cli")]
     walrus_cli: String,
+    #[serde(rename = "n", alias = "walrus_n_shards")]
     walrus_n_shards: u32,
+    #[serde(rename = "p", alias = "egress_proxy_url")]
     egress_proxy_url: String,
+    #[serde(rename = "b", alias = "SONARI_RESIDENCE_R2_BASE_URL")]
+    residence_r2_base_url: String,
+    #[serde(rename = "m", alias = "SONARI_RESIDENCE_TILE_MANIFEST_KEY")]
+    residence_tile_manifest_key: String,
+    #[serde(rename = "s", alias = "SONARI_RESIDENCE_TILE_MANIFEST_SHA256")]
+    residence_tile_manifest_sha256: String,
+    #[serde(rename = "o", alias = "SONARI_RESIDENCE_R2_OBJECT_PREFIX")]
+    residence_r2_object_prefix: String,
+    #[serde(rename = "k", alias = "SONARI_RESIDENCE_R2_BUCKET")]
+    residence_r2_bucket: String,
+    #[serde(rename = "v", alias = "SONARI_RESIDENCE_ALLOWLIST_VERSION")]
+    residence_allowlist_version: String,
+    #[serde(rename = "g", alias = "SONARI_GEO_RESOLUTION")]
+    geo_resolution: String,
+    #[serde(rename = "r", alias = "SONARI_RESIDENCE_ROOT")]
+    residence_root: String,
+    #[serde(rename = "h", alias = "SONARI_RESIDENCE_SOURCE_HASH")]
+    residence_source_hash: Option<String>,
 }
 
 fn set_env_before_server(name: &str, value: &str) {

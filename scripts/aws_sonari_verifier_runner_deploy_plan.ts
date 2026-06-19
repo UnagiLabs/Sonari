@@ -28,6 +28,15 @@ const DEPLOY_PARAMETER_KEYS = [
     "EarthquakeTeeEifS3Bucket",
     "EarthquakeTeeEifS3Key",
     "EarthquakeTeeEifSha256",
+    "ResidenceR2BaseUrl",
+    "ResidenceTileManifestKey",
+    "ResidenceTileManifestSha256",
+    "ResidenceR2ObjectPrefix",
+    "ResidenceR2Bucket",
+    "ResidenceAllowlistVersion",
+    "ResidenceRoot",
+    "ResidenceSourceHash",
+    "GeoResolution",
     "MembershipTeeArtifactS3Bucket",
     "MembershipTeeArtifactS3Key",
     "MembershipTeeArtifactSha256",
@@ -68,6 +77,15 @@ export type BuildAwsSonariVerifierRunnerDeployPlanInput = {
     earthquakeTeeArtifactSha256: string;
     earthquakeEifBucket: string;
     earthquakeEifSha256: string;
+    residenceR2BaseUrl: string;
+    residenceTileManifestKey: string;
+    residenceTileManifestSha256: string;
+    residenceR2ObjectPrefix: string;
+    residenceR2Bucket: string;
+    residenceAllowlistVersion: number;
+    residenceRoot: string;
+    residenceSourceHash?: string;
+    geoResolution: number;
     membershipTeeBucket: string;
     membershipTeeArtifactSha256: string;
     membershipEifBucket: string;
@@ -102,6 +120,15 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
 ): AwsSonariVerifierRunnerDeployPlan {
     const commitSha = validateCommitSha(input.commitSha);
     const prefix = validateS3KeyPrefix(input.prefix ?? DEFAULT_PREFIX);
+    const residenceTileManifestKey = validateRelativeObjectKey(
+        input.residenceTileManifestKey,
+        "residence tile manifest key",
+    );
+    const residenceR2ObjectPrefix = validateRelativeObjectPrefix(
+        input.residenceR2ObjectPrefix,
+        "residence R2 object prefix",
+    );
+    validateManifestKeyPrefix(residenceTileManifestKey, residenceR2ObjectPrefix);
     validateWorldIdProofMode(input.relayerNetwork, input.worldIdProofMode);
 
     const parameterOverrides: Record<DeployParameterKey, string> = {
@@ -119,6 +146,23 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
         ),
         EarthquakeTeeEifS3Key: `${prefix}/${commitSha}/${EARTHQUAKE_EIF_FILE_NAME}`,
         EarthquakeTeeEifSha256: validateSha256(input.earthquakeEifSha256, "earthquake EIF SHA-256"),
+        ResidenceR2BaseUrl: validateHttpsUrl(input.residenceR2BaseUrl, "residence R2 base URL"),
+        ResidenceTileManifestKey: residenceTileManifestKey,
+        ResidenceTileManifestSha256: validateSha256(
+            input.residenceTileManifestSha256,
+            "residence tile manifest SHA-256",
+        ),
+        ResidenceR2ObjectPrefix: residenceR2ObjectPrefix,
+        ResidenceR2Bucket: validateR2Bucket(input.residenceR2Bucket, "residence R2 bucket"),
+        ResidenceAllowlistVersion: String(
+            validatePositiveInteger(input.residenceAllowlistVersion, "residence allowlist version"),
+        ),
+        ResidenceRoot: validateHex32(input.residenceRoot, "residence root"),
+        ResidenceSourceHash:
+            input.residenceSourceHash === undefined
+                ? ""
+                : validateHex32(input.residenceSourceHash, "residence source hash"),
+        GeoResolution: String(validatePositiveInteger(input.geoResolution, "geo resolution")),
         MembershipTeeArtifactS3Bucket: validateS3Bucket(
             input.membershipTeeBucket,
             "membership TEE bucket",
@@ -217,6 +261,51 @@ function validateS3Bucket(value: string, label: string): string {
     return value;
 }
 
+function validateR2Bucket(value: string, label: string): string {
+    const trimmed = value.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,61}[A-Za-z0-9]$/.test(trimmed)) {
+        throw new Error(`Invalid ${label}: expected an R2 bucket name`);
+    }
+    return trimmed;
+}
+
+function validateRelativeObjectKey(value: string, label: string): string {
+    const trimmed = value.trim().replace(/^\/+/u, "");
+    if (
+        trimmed.length === 0 ||
+        trimmed.length > 1024 ||
+        trimmed.endsWith("/") ||
+        trimmed
+            .split("/")
+            .some((segment) => segment.length === 0 || segment === "." || segment === "..")
+    ) {
+        throw new Error(`Invalid ${label}: expected a relative object key`);
+    }
+    return trimmed;
+}
+
+function validateRelativeObjectPrefix(value: string, label: string): string {
+    const trimmed = value.trim().replace(/^\/+|\/+$/gu, "");
+    if (
+        trimmed.length === 0 ||
+        trimmed.length > 1024 ||
+        trimmed
+            .split("/")
+            .some((segment) => segment.length === 0 || segment === "." || segment === "..")
+    ) {
+        throw new Error(`Invalid ${label}: expected a relative object prefix`);
+    }
+    return trimmed;
+}
+
+function validateManifestKeyPrefix(manifestKey: string, objectPrefix: string): void {
+    if (manifestKey !== objectPrefix && !manifestKey.startsWith(`${objectPrefix}/`)) {
+        throw new Error(
+            "residence tile manifest key must start with the residence R2 object prefix",
+        );
+    }
+}
+
 function validateS3KeyPrefix(value: string): string {
     const prefix = value.replace(/^\/+|\/+$/g, "");
     if (
@@ -248,6 +337,14 @@ function validateHttpsUrl(value: string, label: string): string {
     } catch {
         throw new Error(`Invalid ${label}: expected an https URL`);
     }
+}
+
+function validateHex32(value: string, label: string): string {
+    const trimmed = value.trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) {
+        throw new Error(`Invalid ${label}: expected a 32-byte 0x-prefixed hex value`);
+    }
+    return trimmed.toLowerCase();
 }
 
 function validatePositiveInteger(value: number, label: string): number {
@@ -288,6 +385,15 @@ type CliOptions = {
     earthquakeTeeArtifactSha256?: string;
     earthquakeEifBucket?: string;
     earthquakeEifSha256?: string;
+    residenceR2BaseUrl?: string;
+    residenceTileManifestKey?: string;
+    residenceTileManifestSha256?: string;
+    residenceR2ObjectPrefix?: string;
+    residenceR2Bucket?: string;
+    residenceAllowlistVersion?: number;
+    residenceRoot?: string;
+    residenceSourceHash?: string;
+    geoResolution?: number;
     membershipTeeBucket?: string;
     membershipTeeArtifactSha256?: string;
     membershipEifBucket?: string;
@@ -321,6 +427,14 @@ async function main(): Promise<void> {
         options.earthquakeTeeArtifactSha256 === undefined ||
         options.earthquakeEifBucket === undefined ||
         options.earthquakeEifSha256 === undefined ||
+        options.residenceR2BaseUrl === undefined ||
+        options.residenceTileManifestKey === undefined ||
+        options.residenceTileManifestSha256 === undefined ||
+        options.residenceR2ObjectPrefix === undefined ||
+        options.residenceR2Bucket === undefined ||
+        options.residenceAllowlistVersion === undefined ||
+        options.residenceRoot === undefined ||
+        options.geoResolution === undefined ||
         options.membershipTeeBucket === undefined ||
         options.membershipTeeArtifactSha256 === undefined ||
         options.membershipEifBucket === undefined ||
@@ -341,6 +455,15 @@ async function main(): Promise<void> {
                 "--earthquake-tee-sha256 <sha256>",
                 "--earthquake-eif-bucket <bucket>",
                 "--earthquake-eif-sha256 <sha256>",
+                "--residence-r2-base-url <https-url>",
+                "--residence-tile-manifest-key <key>",
+                "--residence-tile-manifest-sha256 <sha256>",
+                "--residence-r2-object-prefix <prefix>",
+                "--residence-r2-bucket <bucket>",
+                "--residence-allowlist-version <version>",
+                "--residence-root <0xhex32>",
+                "[--residence-source-hash <0xhex32>]",
+                "--geo-resolution <resolution>",
                 "--membership-tee-bucket <bucket>",
                 "--membership-tee-sha256 <sha256>",
                 "--membership-eif-bucket <bucket>",
@@ -374,6 +497,17 @@ async function main(): Promise<void> {
         earthquakeTeeArtifactSha256: options.earthquakeTeeArtifactSha256,
         earthquakeEifBucket: options.earthquakeEifBucket,
         earthquakeEifSha256: options.earthquakeEifSha256,
+        residenceR2BaseUrl: options.residenceR2BaseUrl,
+        residenceTileManifestKey: options.residenceTileManifestKey,
+        residenceTileManifestSha256: options.residenceTileManifestSha256,
+        residenceR2ObjectPrefix: options.residenceR2ObjectPrefix,
+        residenceR2Bucket: options.residenceR2Bucket,
+        residenceAllowlistVersion: options.residenceAllowlistVersion,
+        residenceRoot: options.residenceRoot,
+        ...(options.residenceSourceHash === undefined
+            ? {}
+            : { residenceSourceHash: options.residenceSourceHash }),
+        geoResolution: options.geoResolution,
         membershipTeeBucket: options.membershipTeeBucket,
         membershipTeeArtifactSha256: options.membershipTeeArtifactSha256,
         membershipEifBucket: options.membershipEifBucket,
@@ -455,6 +589,33 @@ function parseArgs(args: string[]): CliOptions {
                 break;
             case "--earthquake-eif-sha256":
                 options.earthquakeEifSha256 = next;
+                break;
+            case "--residence-r2-base-url":
+                options.residenceR2BaseUrl = next;
+                break;
+            case "--residence-tile-manifest-key":
+                options.residenceTileManifestKey = next;
+                break;
+            case "--residence-tile-manifest-sha256":
+                options.residenceTileManifestSha256 = next;
+                break;
+            case "--residence-r2-object-prefix":
+                options.residenceR2ObjectPrefix = next;
+                break;
+            case "--residence-r2-bucket":
+                options.residenceR2Bucket = next;
+                break;
+            case "--residence-allowlist-version":
+                options.residenceAllowlistVersion = parseIntegerOption(arg, next);
+                break;
+            case "--residence-root":
+                options.residenceRoot = next;
+                break;
+            case "--residence-source-hash":
+                options.residenceSourceHash = next;
+                break;
+            case "--geo-resolution":
+                options.geoResolution = parseIntegerOption(arg, next);
                 break;
             case "--membership-tee-bucket":
                 options.membershipTeeBucket = next;

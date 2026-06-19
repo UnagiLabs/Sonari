@@ -45,6 +45,15 @@ jobs:
       WORLD_ID_API_BASE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_API_BASE }}
       WORLD_ID_PROOF_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_PROOF_MODE }}
       SONARI_SUI_GRAPHQL_URL: ${{ vars.SONARI_SUI_GRAPHQL_URL }}
+      SONARI_RESIDENCE_R2_BASE_URL: ${{ vars.SONARI_RESIDENCE_R2_BASE_URL }}
+      SONARI_RESIDENCE_TILE_MANIFEST_KEY: ${{ vars.SONARI_RESIDENCE_TILE_MANIFEST_KEY }}
+      SONARI_RESIDENCE_TILE_MANIFEST_SHA256: ${{ vars.SONARI_RESIDENCE_TILE_MANIFEST_SHA256 }}
+      SONARI_RESIDENCE_R2_OBJECT_PREFIX: ${{ vars.SONARI_RESIDENCE_R2_OBJECT_PREFIX }}
+      SONARI_RESIDENCE_R2_BUCKET: ${{ vars.SONARI_RESIDENCE_R2_BUCKET }}
+      SONARI_RESIDENCE_ALLOWLIST_VERSION: ${{ vars.SONARI_RESIDENCE_ALLOWLIST_VERSION }}
+      SONARI_RESIDENCE_ROOT: ${{ vars.SONARI_RESIDENCE_ROOT }}
+      SONARI_RESIDENCE_SOURCE_HASH: ${{ vars.SONARI_RESIDENCE_SOURCE_HASH }}
+      SONARI_GEO_RESOLUTION: ${{ vars.SONARI_GEO_RESOLUTION }}
       NITRO_CLI_TAG: v1.4.4
       S3_PREFIX: sonari-verifier-runner
       # testnet 互換の pinned Sui CLI（PCR 自動再登録で sui client / keytool を使う）。
@@ -80,6 +89,14 @@ jobs:
             WORLD_ID_APP_ID
             WORLD_ID_ACTION
             SONARI_SUI_GRAPHQL_URL
+            SONARI_RESIDENCE_R2_BASE_URL
+            SONARI_RESIDENCE_TILE_MANIFEST_KEY
+            SONARI_RESIDENCE_TILE_MANIFEST_SHA256
+            SONARI_RESIDENCE_R2_OBJECT_PREFIX
+            SONARI_RESIDENCE_R2_BUCKET
+            SONARI_RESIDENCE_ALLOWLIST_VERSION
+            SONARI_RESIDENCE_ROOT
+            SONARI_GEO_RESOLUTION
           )
           for name in "${required_names[@]}"; do
             if [[ -z "${!name}" ]]; then
@@ -122,6 +139,41 @@ jobs:
 
           if [[ ! "$WORLD_ID_ACTION" =~ ^sonari_membership_register_v[0-9]+$ ]]; then
             echo "WORLD_ID_ACTION must match sonari_membership_register_v<N>" >&2
+            exit 1
+          fi
+
+          if [[ ! "$SONARI_RESIDENCE_R2_BASE_URL" =~ ^https://[^[:space:]/]+(/.*)?$ ]]; then
+            echo "SONARI_RESIDENCE_R2_BASE_URL must be an https URL" >&2
+            exit 1
+          fi
+
+          if [[ "$SONARI_RESIDENCE_TILE_MANIFEST_KEY" != "$SONARI_RESIDENCE_R2_OBJECT_PREFIX"/* ]]; then
+            echo "SONARI_RESIDENCE_TILE_MANIFEST_KEY must start with SONARI_RESIDENCE_R2_OBJECT_PREFIX" >&2
+            exit 1
+          fi
+
+          if [[ ! "$SONARI_RESIDENCE_TILE_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "SONARI_RESIDENCE_TILE_MANIFEST_SHA256 must be a lowercase SHA-256 digest" >&2
+            exit 1
+          fi
+
+          if [[ ! "$SONARI_RESIDENCE_ROOT" =~ ^0x[0-9a-f]{64}$ ]]; then
+            echo "SONARI_RESIDENCE_ROOT must be a 32-byte 0x-prefixed lowercase hex value" >&2
+            exit 1
+          fi
+
+          if [[ -n "${SONARI_RESIDENCE_SOURCE_HASH:-}" && ! "$SONARI_RESIDENCE_SOURCE_HASH" =~ ^0x[0-9a-f]{64}$ ]]; then
+            echo "SONARI_RESIDENCE_SOURCE_HASH must be empty or a 32-byte 0x-prefixed lowercase hex value" >&2
+            exit 1
+          fi
+
+          if [[ ! "$SONARI_RESIDENCE_ALLOWLIST_VERSION" =~ ^[1-9][0-9]*$ ]]; then
+            echo "SONARI_RESIDENCE_ALLOWLIST_VERSION must be a positive integer" >&2
+            exit 1
+          fi
+
+          if [[ ! "$SONARI_GEO_RESOLUTION" =~ ^[1-9][0-9]*$ ]]; then
+            echo "SONARI_GEO_RESOLUTION must be a positive integer" >&2
             exit 1
           fi
 
@@ -685,6 +737,14 @@ jobs:
             --earthquake-tee-sha256 "$EARTHQUAKE_TEE_ARTIFACT_SHA256"
             --earthquake-eif-bucket "$ARTIFACT_BUCKET"
             --earthquake-eif-sha256 "$EARTHQUAKE_EIF_SHA256"
+            --residence-r2-base-url "$SONARI_RESIDENCE_R2_BASE_URL"
+            --residence-tile-manifest-key "$SONARI_RESIDENCE_TILE_MANIFEST_KEY"
+            --residence-tile-manifest-sha256 "$SONARI_RESIDENCE_TILE_MANIFEST_SHA256"
+            --residence-r2-object-prefix "$SONARI_RESIDENCE_R2_OBJECT_PREFIX"
+            --residence-r2-bucket "$SONARI_RESIDENCE_R2_BUCKET"
+            --residence-allowlist-version "$SONARI_RESIDENCE_ALLOWLIST_VERSION"
+            --residence-root "$SONARI_RESIDENCE_ROOT"
+            --geo-resolution "$SONARI_GEO_RESOLUTION"
             --membership-tee-bucket "$ARTIFACT_BUCKET"
             --membership-tee-sha256 "$MEMBERSHIP_TEE_ARTIFACT_SHA256"
             --membership-eif-bucket "$ARTIFACT_BUCKET"
@@ -700,6 +760,9 @@ jobs:
           )
           if [[ -n "${RELAYER_NETWORK:-}" ]]; then
             deploy_plan_args+=(--relayer-network "$RELAYER_NETWORK")
+          fi
+          if [[ -n "${SONARI_RESIDENCE_SOURCE_HASH:-}" ]]; then
+            deploy_plan_args+=(--residence-source-hash "$SONARI_RESIDENCE_SOURCE_HASH")
           fi
           # SourceArchiver の Sui network も同じ単一情報源（SONARI_SUI_NETWORK=RELAYER_NETWORK）から渡す。
           # deploy plan は mainnet|testnet のみ受け付けるため、その範囲のときだけ明示注入する
@@ -731,6 +794,15 @@ jobs:
             "EarthquakeTeeEifS3Bucket",
             "EarthquakeTeeEifS3Key",
             "EarthquakeTeeEifSha256",
+            "ResidenceR2BaseUrl",
+            "ResidenceTileManifestKey",
+            "ResidenceTileManifestSha256",
+            "ResidenceR2ObjectPrefix",
+            "ResidenceR2Bucket",
+            "ResidenceAllowlistVersion",
+            "ResidenceRoot",
+            "ResidenceSourceHash",
+            "GeoResolution",
             "MembershipTeeArtifactS3Bucket",
             "MembershipTeeArtifactS3Key",
             "MembershipTeeArtifactSha256",

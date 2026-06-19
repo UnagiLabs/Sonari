@@ -7,6 +7,9 @@ const execFileAsync = promisify(execFile);
 const validCommitSha = "0123456789abcdef0123456789abcdef01234567";
 const validEarthquakeTeeSha256 = "a".repeat(64);
 const validEarthquakeEifSha256 = "b".repeat(64);
+const validResidenceManifestSha256 = "1".repeat(64);
+const validResidenceRoot = `0x${"2".repeat(64)}`;
+const validResidenceSourceHash = `0x${"3".repeat(64)}`;
 const validMembershipTeeSha256 = "c".repeat(64);
 const validMembershipEifSha256 = "d".repeat(64);
 const validCensusTeeSha256 = "e".repeat(64);
@@ -19,6 +22,15 @@ const validInput = {
     earthquakeTeeArtifactSha256: validEarthquakeTeeSha256,
     earthquakeEifBucket: "earthquake-eif-artifacts",
     earthquakeEifSha256: validEarthquakeEifSha256,
+    residenceR2BaseUrl: "https://pub-residence-r2.example.com/residence",
+    residenceTileManifestKey: "residence/v1/tile_manifest.json",
+    residenceTileManifestSha256: validResidenceManifestSha256,
+    residenceR2ObjectPrefix: "residence/v1",
+    residenceR2Bucket: "sonari-residence-tiles",
+    residenceAllowlistVersion: 1,
+    residenceRoot: validResidenceRoot,
+    residenceSourceHash: validResidenceSourceHash,
+    geoResolution: 7,
     membershipTeeBucket: "membership-tee-artifacts",
     membershipTeeArtifactSha256: validMembershipTeeSha256,
     membershipEifBucket: "membership-eif-artifacts",
@@ -60,6 +72,21 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         expect(plan.parameterOverrides.EarthquakeTeeEifS3Key).toBe(
             `sonari-verifier-runner/${validCommitSha}/earthquake-tee.eif`,
         );
+        expect(plan.parameterOverrides.ResidenceR2BaseUrl).toBe(
+            "https://pub-residence-r2.example.com/residence",
+        );
+        expect(plan.parameterOverrides.ResidenceTileManifestKey).toBe(
+            "residence/v1/tile_manifest.json",
+        );
+        expect(plan.parameterOverrides.ResidenceTileManifestSha256).toBe(
+            validResidenceManifestSha256,
+        );
+        expect(plan.parameterOverrides.ResidenceR2ObjectPrefix).toBe("residence/v1");
+        expect(plan.parameterOverrides.ResidenceR2Bucket).toBe("sonari-residence-tiles");
+        expect(plan.parameterOverrides.ResidenceAllowlistVersion).toBe("1");
+        expect(plan.parameterOverrides.ResidenceRoot).toBe(validResidenceRoot);
+        expect(plan.parameterOverrides.ResidenceSourceHash).toBe(validResidenceSourceHash);
+        expect(plan.parameterOverrides.GeoResolution).toBe("7");
         expect(plan.parameterOverrides.TeeEifS3Key).toBe(
             `sonari-verifier-runner/${validCommitSha}/membership-identity-tee.eif`,
         );
@@ -88,6 +115,12 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         expect(() =>
             buildAwsSonariVerifierRunnerDeployPlan({
                 ...validInput,
+                residenceTileManifestSha256: "not-a-sha",
+            }),
+        ).toThrow("Invalid residence tile manifest SHA-256");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
                 membershipTeeArtifactSha256: "not-a-sha",
             }),
         ).toThrow("Invalid membership TEE artifact SHA-256");
@@ -109,6 +142,57 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 censusEifSha256: "not-a-sha",
             }),
         ).toThrow("Invalid census EIF SHA-256");
+    });
+
+    it("fails closed when residence tile deployment inputs are invalid", () => {
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                residenceR2BaseUrl: "http://pub-residence-r2.example.com",
+            }),
+        ).toThrow("Invalid residence R2 base URL");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                residenceTileManifestKey: "../tile_manifest.json",
+            }),
+        ).toThrow("Invalid residence tile manifest key");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                residenceTileManifestKey: "other/tile_manifest.json",
+            }),
+        ).toThrow("residence tile manifest key must start");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                residenceR2ObjectPrefix: "../residence",
+            }),
+        ).toThrow("Invalid residence R2 object prefix");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                residenceAllowlistVersion: 0,
+            }),
+        ).toThrow("Invalid residence allowlist version");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                residenceRoot: "not-hex",
+            }),
+        ).toThrow("Invalid residence root");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                residenceSourceHash: "not-hex",
+            }),
+        ).toThrow("Invalid residence source hash");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                geoResolution: 0,
+            }),
+        ).toThrow("Invalid geo resolution");
     });
 
     it("validates source archiver deployment ARNs", () => {
@@ -146,6 +230,15 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 `EarthquakeTeeEifS3Bucket=${validInput.earthquakeEifBucket}`,
                 `EarthquakeTeeEifS3Key=sonari-verifier-runner/${validCommitSha}/earthquake-tee.eif`,
                 `EarthquakeTeeEifSha256=${validEarthquakeEifSha256}`,
+                "ResidenceR2BaseUrl=https://pub-residence-r2.example.com/residence",
+                "ResidenceTileManifestKey=residence/v1/tile_manifest.json",
+                `ResidenceTileManifestSha256=${validResidenceManifestSha256}`,
+                "ResidenceR2ObjectPrefix=residence/v1",
+                "ResidenceR2Bucket=sonari-residence-tiles",
+                "ResidenceAllowlistVersion=1",
+                `ResidenceRoot=${validResidenceRoot}`,
+                `ResidenceSourceHash=${validResidenceSourceHash}`,
+                "GeoResolution=7",
                 `MembershipTeeArtifactS3Bucket=${validInput.membershipTeeBucket}`,
                 [
                     "MembershipTeeArtifactS3Key=sonari-verifier-runner",
@@ -283,6 +376,24 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 validInput.earthquakeEifBucket,
                 "--earthquake-eif-sha256",
                 validEarthquakeEifSha256,
+                "--residence-r2-base-url",
+                validInput.residenceR2BaseUrl,
+                "--residence-tile-manifest-key",
+                validInput.residenceTileManifestKey,
+                "--residence-tile-manifest-sha256",
+                validResidenceManifestSha256,
+                "--residence-r2-object-prefix",
+                validInput.residenceR2ObjectPrefix,
+                "--residence-r2-bucket",
+                validInput.residenceR2Bucket,
+                "--residence-allowlist-version",
+                String(validInput.residenceAllowlistVersion),
+                "--residence-root",
+                validResidenceRoot,
+                "--residence-source-hash",
+                validResidenceSourceHash,
+                "--geo-resolution",
+                String(validInput.geoResolution),
                 "--membership-tee-bucket",
                 validInput.membershipTeeBucket,
                 "--membership-tee-sha256",

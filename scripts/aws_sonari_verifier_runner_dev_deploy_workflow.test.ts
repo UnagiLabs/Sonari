@@ -65,10 +65,24 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_TOKEN_SECRET_ARN",
             "AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN",
             "WORLD_ID_ACTION: $" + "{{ vars.SONARI_WORLD_ID_ACTION }}",
+            "SONARI_RESIDENCE_R2_BASE_URL: $" + "{{ vars.SONARI_RESIDENCE_R2_BASE_URL }}",
+            "SONARI_RESIDENCE_TILE_MANIFEST_KEY: $" +
+                "{{ vars.SONARI_RESIDENCE_TILE_MANIFEST_KEY }}",
+            "SONARI_RESIDENCE_TILE_MANIFEST_SHA256: $" +
+                "{{ vars.SONARI_RESIDENCE_TILE_MANIFEST_SHA256 }}",
+            "SONARI_RESIDENCE_R2_OBJECT_PREFIX: $" + "{{ vars.SONARI_RESIDENCE_R2_OBJECT_PREFIX }}",
+            "SONARI_RESIDENCE_R2_BUCKET: $" + "{{ vars.SONARI_RESIDENCE_R2_BUCKET }}",
+            "SONARI_RESIDENCE_ALLOWLIST_VERSION: $" +
+                "{{ vars.SONARI_RESIDENCE_ALLOWLIST_VERSION }}",
+            "SONARI_RESIDENCE_ROOT: $" + "{{ vars.SONARI_RESIDENCE_ROOT }}",
+            "SONARI_RESIDENCE_SOURCE_HASH: $" + "{{ vars.SONARI_RESIDENCE_SOURCE_HASH }}",
+            "SONARI_GEO_RESOLUTION: $" + "{{ vars.SONARI_GEO_RESOLUTION }}",
         ]);
         expect(workflow).not.toContain("AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_ACTION");
         expect(workflow).not.toContain("AWS_ACCESS_KEY_ID");
         expect(workflow).not.toContain("AWS_SECRET_ACCESS_KEY");
+        expect(workflow).not.toContain("CLOUDFLARE_API_TOKEN");
+        expect(workflow).not.toContain("CLOUDFLARE_ACCOUNT_ID");
         expect(workflow).not.toContain("secrets.AWS_");
     });
 
@@ -94,6 +108,22 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "SourceArchiverPrivateKeySecretArn",
             "SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN must be set or recoverable from the dev stack SourceArchiverPrivateKeySecretArn parameter",
             "SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN=%s",
+            "SONARI_RESIDENCE_R2_BASE_URL",
+            "SONARI_RESIDENCE_TILE_MANIFEST_KEY",
+            "SONARI_RESIDENCE_TILE_MANIFEST_SHA256",
+            "SONARI_RESIDENCE_R2_OBJECT_PREFIX",
+            "SONARI_RESIDENCE_R2_BUCKET",
+            "SONARI_RESIDENCE_ALLOWLIST_VERSION",
+            "SONARI_RESIDENCE_ROOT",
+            "SONARI_GEO_RESOLUTION",
+            '[[ ! "$SONARI_RESIDENCE_R2_BASE_URL" =~ ^https://[^[:space:]/]+(/.*)?$ ]]',
+            '[[ "$SONARI_RESIDENCE_TILE_MANIFEST_KEY" != "$SONARI_RESIDENCE_R2_OBJECT_PREFIX"/* ]]',
+            '[[ ! "$SONARI_RESIDENCE_TILE_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]',
+            '[[ ! "$SONARI_RESIDENCE_ROOT" =~ ^0x[0-9a-f]{64}$ ]]',
+            '[[ -n "$' +
+                '{SONARI_RESIDENCE_SOURCE_HASH:-}" && ! "$SONARI_RESIDENCE_SOURCE_HASH" =~ ^0x[0-9a-f]{64}$ ]]',
+            '[[ ! "$SONARI_RESIDENCE_ALLOWLIST_VERSION" =~ ^[1-9][0-9]*$ ]]',
+            '[[ ! "$SONARI_GEO_RESOLUTION" =~ ^[1-9][0-9]*$ ]]',
         ]);
 
         const requiredNamesMatch = workflow.match(/required_names=\(\n([\s\S]*?)\n {10}\)/u);
@@ -305,6 +335,24 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "--earthquake-eif-bucket",
             "--earthquake-eif-sha256",
             "$EARTHQUAKE_EIF_SHA256",
+            "--residence-r2-base-url",
+            "$SONARI_RESIDENCE_R2_BASE_URL",
+            "--residence-tile-manifest-key",
+            "$SONARI_RESIDENCE_TILE_MANIFEST_KEY",
+            "--residence-tile-manifest-sha256",
+            "$SONARI_RESIDENCE_TILE_MANIFEST_SHA256",
+            "--residence-r2-object-prefix",
+            "$SONARI_RESIDENCE_R2_OBJECT_PREFIX",
+            "--residence-r2-bucket",
+            "$SONARI_RESIDENCE_R2_BUCKET",
+            "--residence-allowlist-version",
+            "$SONARI_RESIDENCE_ALLOWLIST_VERSION",
+            "--residence-root",
+            "$SONARI_RESIDENCE_ROOT",
+            "--residence-source-hash",
+            "$SONARI_RESIDENCE_SOURCE_HASH",
+            "--geo-resolution",
+            "$SONARI_GEO_RESOLUTION",
             "--membership-tee-sha256",
             "$MEMBERSHIP_TEE_ARTIFACT_SHA256",
             "--membership-eif-sha256",
@@ -332,6 +380,15 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "EarthquakeTeeEifS3Bucket",
             "EarthquakeTeeEifS3Key",
             "EarthquakeTeeEifSha256",
+            "ResidenceR2BaseUrl",
+            "ResidenceTileManifestKey",
+            "ResidenceTileManifestSha256",
+            "ResidenceR2ObjectPrefix",
+            "ResidenceR2Bucket",
+            "ResidenceAllowlistVersion",
+            "ResidenceRoot",
+            "ResidenceSourceHash",
+            "GeoResolution",
             "MembershipTeeArtifactS3Bucket",
             "MembershipTeeArtifactS3Key",
             "MembershipTeeArtifactSha256",
