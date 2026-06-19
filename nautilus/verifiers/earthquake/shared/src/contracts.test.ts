@@ -107,6 +107,14 @@ const validEvidenceManifest = {
         hash: "0x6666666666666666666666666666666666666666666666666666666666666666",
         root: currentPayload.affected_cells_root,
         count: 2,
+        total_cell_count: 3,
+        land_cell_count: 2,
+        water_cell_count: 1,
+        land_allowlist_version: 1,
+        land_allowlist_root: "0x9999999999999999999999999999999999999999999999999999999999999999",
+        land_allowlist_source_hash:
+            "0x8888888888888888888888888888888888888888888888888888888888888888",
+        land_classifier: "r2_residence_tile_manifest_v1",
         geo_resolution: 7,
     },
 } as const;
@@ -210,6 +218,7 @@ describe("oracle schema contracts", () => {
             "SHAKEMAP_PARSE_FAILED",
             "MMI_NOT_AVAILABLE",
             "NO_AFFECTED_CELLS",
+            "SEA_ONLY_AFFECTED_CELLS",
             "SOURCE_STALE",
             "SOURCE_REVISION_OLD",
             "UNSUPPORTED_HAZARD_TYPE",
