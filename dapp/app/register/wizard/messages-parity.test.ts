@@ -238,11 +238,9 @@ describe("messages catalog parity", () => {
     });
 
     it("welcome の connect panel 説明を catalog で管理する", () => {
-        const keys = [
-            "register.wizard.welcome.walletGoogleTitle",
-            "register.wizard.welcome.walletGoogleBody",
-            "register.wizard.welcome.walletSponsorNote",
-        ];
+        // gas-free（ガス代肩代わり）の説明のみを connect panel に残す。
+        // Google zkLogin の補足（walletGoogleTitle/Body）は冗長なため削除済み。
+        const keys = ["register.wizard.welcome.walletSponsorNote"];
         for (const key of keys) {
             expect(en.has(key), key).toBe(true);
             expect(ja.has(key), key).toBe(true);
@@ -250,9 +248,17 @@ describe("messages catalog parity", () => {
     });
 
     it("welcome step は connect panel 説明を実際に参照する", () => {
-        expect(welcomeStepSource).toContain('t("walletGoogleTitle")');
-        expect(welcomeStepSource).toContain('t("walletGoogleBody")');
         expect(welcomeStepSource).toContain('t("walletSponsorNote")');
+    });
+
+    it("削除した Google zkLogin 補足文言キーを残さない", () => {
+        for (const key of [
+            "register.wizard.welcome.walletGoogleTitle",
+            "register.wizard.welcome.walletGoogleBody",
+        ]) {
+            expect(en.has(key), key).toBe(false);
+            expect(ja.has(key), key).toBe(false);
+        }
     });
 
     it("register、claim、mypage は WalletConnect を直接描画する", () => {
