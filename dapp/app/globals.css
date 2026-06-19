@@ -5257,50 +5257,454 @@ h4 {
   line-height: 1.7;
 }
 
-/* 居住地・本人確認・会員証ステータスの 3 セクションを縦に並べる。 */
-.mypage-groups {
-  display: grid;
-  gap: 20px;
+/* 見出しは membership ステップと同じく左寄せ・小さめギャップにする。 */
+.mypage-heading {
+  justify-items: start;
+  text-align: left;
+  gap: 8px;
 }
 
-.mypage-group {
+/* パスポート 2 カラム（モバイルは縦積み、デスクトップで左 360px｜右 1fr）。 */
+.mypage-passport {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+/* 左カラム：パス／クイック状態／救済 CTA。 */
+.mypage-aside {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-xs);
 }
 
-.mypage-group h2 {
+/* 共通：オン（緑ドット）／オフ（琥珀ドット）の状態ドット。 */
+.mypage-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: oklch(0.7 0.1 70);
+}
+
+/* ------- 縦型ソウルバウンドパス ------- */
+.mypage-pass {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 300px;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(160deg, var(--sage-700), var(--sage-900));
+  box-shadow: 0 16px 40px oklch(0.3 0.04 150 / 0.3);
+  color: var(--sage-50);
+}
+
+.mypage-pass-watermark {
+  position: absolute;
+  color: #fff;
+}
+
+.mypage-pass-watermark--lg {
+  top: -54px;
+  right: -64px;
+  width: 230px;
+  height: 230px;
+  opacity: 0.1;
+}
+
+.mypage-pass-watermark--sm {
+  bottom: -50px;
+  left: -40px;
+  width: 150px;
+  height: 150px;
+  opacity: 0.06;
+}
+
+.mypage-pass-watermark polygon {
+  stroke-width: 0.8;
+}
+
+.mypage-pass-head,
+.mypage-pass-title,
+.mypage-pass-fields {
+  position: relative;
+}
+
+.mypage-pass-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mypage-pass-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-serif);
+  font-size: 21px;
+}
+
+.mypage-pass-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: oklch(0.97 0.012 145 / 0.16);
+}
+
+.mypage-pass-logo-glyph {
+  width: 14px;
+  height: 14px;
+}
+
+/* パス上の状態ピル（不透明な淡色チップに状態ラベル）。 */
+.mypage-pass-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: oklch(0.97 0.012 145 / 0.92);
+  color: var(--sage-900);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.mypage-pass-status--active .mypage-status-dot {
+  background: oklch(0.55 0.13 150);
+}
+
+.mypage-pass-kicker {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.mypage-pass-name {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-serif);
+  font-size: 29px;
+  line-height: 1.1;
+}
+
+.mypage-pass-subtitle {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  opacity: 0.74;
+}
+
+.mypage-pass-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 30px;
+  margin: 0;
+}
+
+.mypage-pass-field {
+  margin: 0;
+}
+
+.mypage-pass-field--wide {
+  flex-basis: 100%;
+}
+
+.mypage-pass-field dt {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.mypage-pass-field dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+/* monospace 値（セル ID・ウォレット・ネットワーク）。 */
+.mypage-mono {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* ------- クイック状態カード ------- */
+.mypage-quickstatus {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.mypage-quickstatus-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mypage-quickstatus-label {
+  font-size: 13.5px;
+  color: var(--ink-muted);
+}
+
+.mypage-quickstatus-divider {
+  height: 1px;
+  background: var(--line);
+}
+
+/* 状態ピル（既定は中立、--active で緑）。 */
+.mypage-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.mypage-status-pill--active {
+  color: oklch(0.4 0.1 150);
+}
+
+.mypage-status-pill--active .mypage-status-dot {
+  background: oklch(0.55 0.13 150);
+}
+
+/* 本人確認ピル（既定は中立、--verified で緑＋チェック）。 */
+.mypage-identity-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+
+.mypage-identity-pill--verified {
+  color: var(--sage-700);
+}
+
+.mypage-pill-icon {
+  width: 13px;
+  height: 13px;
+}
+
+/* ------- 救済 CTA カード ------- */
+.mypage-relief {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 18px;
+  border: 1px solid var(--sage-200);
+  border-radius: var(--radius-md);
+  background: var(--sage-100);
+}
+
+.mypage-relief-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mypage-relief-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--sage-700);
+}
+
+.mypage-relief-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.mypage-relief-body {
+  margin: 0 0 5px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
+.mypage-relief .btn {
+  width: 100%;
+}
+
+/* ------- 右カラム：詳細カード ------- */
+.mypage-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mypage-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.mypage-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mypage-card-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mypage-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--sage-100);
+  color: var(--sage-700);
+}
+
+.mypage-card-icon-glyph {
+  width: 16px;
+  height: 16px;
+}
+
+.mypage-card-title {
   margin: 0;
   font-family: var(--font-serif);
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 500;
   color: var(--ink);
 }
 
-/* ラベル（dt）と値（dd）を 2 列で読みやすく並べる。 */
-.mypage-group dl {
+/* オンチェーン台帳カードの上部ラベル（小さい大文字見出し）。 */
+.mypage-card-eyebrow {
+  margin: 0;
+  padding: 12px 20px;
+  background: var(--sage-50);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* 居住地カード本体（情報｜地図、モバイルは縦積み）。 */
+.mypage-residence-body {
   display: grid;
-  grid-template-columns: minmax(0, 160px) 1fr;
-  gap: 12px 20px;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  padding: 18px 20px;
+}
+
+/* ラベル／値の縦積みリスト。 */
+.mypage-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   margin: 0;
 }
 
-.mypage-group dt {
+.mypage-fact {
+  margin: 0;
+}
+
+.mypage-fact dt {
+  font-size: 12px;
   color: var(--ink-muted);
+}
+
+.mypage-fact dd {
+  margin: 3px 0 0;
+  font-size: 14px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* 本人確認カードの 3 値（モバイル 1 列／デスクトップ 3 列）。 */
+.mypage-card-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin: 0;
+  padding: 16px 20px;
+}
+
+/* 状態ピル付きの台帳行（オンチェーン記録）。 */
+.mypage-ledger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mypage-ledger-row:last-child {
+  border-bottom: 0;
+}
+
+.mypage-ledger-row span {
+  font-size: 13.5px;
+  color: var(--ink-muted);
+}
+
+.mypage-ledger-row strong {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: right;
+}
+
+.mypage-ledger-row strong.mypage-mono {
   font-size: 13px;
   font-weight: 500;
 }
 
-.mypage-group dd {
-  margin: 0;
-  color: var(--ink);
-  font-size: 15px;
-  overflow-wrap: anywhere;
+/* 本人確認カードのバッジ（本人確認ピルを流用、ヘッダー右に配置）。 */
+.mypage-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--sage-100);
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mypage-badge--verified {
+  background: oklch(0.95 0.04 150);
+  color: oklch(0.38 0.1 150);
 }
 
 /* 居住地セルの地図枠。 */
@@ -5343,15 +5747,38 @@ h4 {
   line-height: 1.6;
 }
 
-@media (max-width: 620px) {
-  /* 狭い画面ではラベルと値を縦積みにして折り返しを防ぐ。 */
-  .mypage-group dl {
-    grid-template-columns: 1fr;
-    gap: 4px;
+/* 600px 以上：居住地カードは情報｜地図の 2 列、本人確認の 3 値は 3 列＋区切り線。 */
+@media (min-width: 600px) {
+  .mypage-residence-body {
+    grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
   }
 
-  .mypage-group dt:not(:first-of-type) {
-    margin-top: 10px;
+  .mypage-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    padding: 0;
+  }
+
+  .mypage-card-grid .mypage-fact {
+    padding: 16px 20px;
+    border-right: 1px solid var(--line);
+  }
+
+  .mypage-card-grid .mypage-fact:last-child {
+    border-right: 0;
+  }
+}
+
+/* 880px 以上：パスポートを左 348px｜右 1fr の 2 カラムにし、左カラムを sticky にする。 */
+@media (min-width: 880px) {
+  .mypage-passport {
+    grid-template-columns: 348px minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  .mypage-aside {
+    position: sticky;
+    top: 24px;
   }
 }
 

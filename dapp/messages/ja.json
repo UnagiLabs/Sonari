@@ -300,7 +300,22 @@
     },
     "mypage": {
         "title": "マイページ",
+        "eyebrow": "メンバーエリア",
         "subtitle": "あなたの会員証（MembershipPass）の内容を確認できます。",
+        "pass": {
+            "kicker": "メンバーシップ",
+            "name": "ソウルバウンドパス",
+            "subtitle": "譲渡不可・ウォレットに紐づく会員証",
+            "residenceLabel": "居住地セル",
+            "walletLabel": "ウォレット",
+            "walletPlaceholder": "未接続",
+            "networkLabel": "ネットワーク",
+            "networkValue": "Sui"
+        },
+        "quick": {
+            "passStateLabel": "会員証の状態",
+            "identityLabel": "本人確認"
+        },
         "claim": {
             "heading": "救済を受け取る",
             "body": "あなたが対象となりうる災害支援が実施されているとき、ここから受け取り資格を確認して救済を受け取れます。",
@@ -346,8 +361,11 @@
         },
         "status": {
             "heading": "会員証のステータス",
+            "onchainEyebrow": "会員証のステータス・オンチェーン記録",
             "stateLabel": "状態",
-            "issuedAtLabel": "発行日"
+            "issuedAtLabel": "発行日",
+            "networkLabel": "ネットワーク",
+            "networkValue": "Sui"
         },
         "statusLabels": {
             "active": "有効",

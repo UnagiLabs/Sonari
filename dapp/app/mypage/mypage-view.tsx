@@ -1,5 +1,12 @@
 "use client";
 
+// Claude Design の "My Page" を取り込んだデザイン。発行済みの MembershipPass を
+// パスポート風に見せる 2 カラム構成（モバイルは縦積み）。左カラムは縦型ソウルバウンド
+// パス＋クイック状態＋救済 CTA、右カラムは居住地・本人確認・オンチェーン台帳の詳細。
+// 見た目だけの変更で、SBT 照会・本人確認状況・各状態の出し分けなどの機能は従来の
+// readMembershipPass / deriveMypageView / pass-view に委譲したまま不変。色・影・角丸・
+// フォントはすべて既存のデザイントークンに揃える（membership ステップと同じ流儀）。
+
 import { useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -7,6 +14,7 @@ import { resolveMembershipDappGenesisObjects } from "../chain/genesis-objects";
 import { createJsonRpcEventClient } from "../chain/json-rpc-event-client";
 import { LoadingIndicator } from "../components/loading-indicator";
 import type { SonariLocale } from "../register/wizard/locale";
+import { shortAddress } from "../register/wizard/steps/membership-presence";
 import { WalletConnect } from "../wallet/wallet-connect";
 import { HomeCellMap } from "./home-cell-map";
 import { fetchIdentityJobStatus } from "./identity-job-status";
@@ -22,6 +30,87 @@ import {
     providerLabelKeys,
     statusLabelKey,
 } from "./pass-view";
+
+// ---------------------------------------------------------------------------
+// 装飾アイコン（すべて aria-hidden・色は CSS の currentColor／指定色に従う）。
+// membership ステップと同じ六角形ロゴ／チェック／稲妻を共有の見た目で使う。
+// ---------------------------------------------------------------------------
+
+// パスのロゴ・透かしで使う六角形（アウトライン）。
+function HexGlyph({ className }: { readonly className: string }) {
+    return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+            <polygon
+                fill="none"
+                points="12,2 21,7 21,17 12,22 3,17 3,7"
+                stroke="currentColor"
+                strokeWidth="2"
+            />
+        </svg>
+    );
+}
+
+// 本人確認済み・有効フラグのチェックマーク。
+function CheckGlyph({ className }: { readonly className: string }) {
+    return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+            <path
+                d="M20 6 9 17l-5-5"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="3.2"
+            />
+        </svg>
+    );
+}
+
+// 救済を受け取る導線（稲妻）。
+function BoltGlyph({ className }: { readonly className: string }) {
+    return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+            <path
+                d="M13 2 4 14h6l-1 8 9-12h-6z"
+                fill="none"
+                stroke="currentColor"
+                strokeLinejoin="round"
+                strokeWidth="1.8"
+            />
+        </svg>
+    );
+}
+
+// 居住地（ピン）。
+function PinGlyph({ className }: { readonly className: string }) {
+    return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+            <path
+                d="M12 21s7-5.2 7-11a7 7 0 0 0-14 0c0 5.8 7 11 7 11z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+            />
+            <circle cx="12" cy="10" fill="none" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+        </svg>
+    );
+}
+
+// 本人確認（人物）。
+function PersonGlyph({ className }: { readonly className: string }) {
+    return (
+        <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+            <circle cx="12" cy="8.5" fill="none" r="3.4" stroke="currentColor" strokeWidth="1.7" />
+            <path
+                d="M5.5 19c1.2-3.2 3.7-4.6 6.5-4.6s5.3 1.4 6.5 4.6"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeWidth="1.7"
+            />
+        </svg>
+    );
+}
 
 const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
 const identityStatusUrl = process.env.NEXT_PUBLIC_SONARI_IDENTITY_STATUS_URL ?? "";
@@ -179,7 +268,8 @@ export function MypageView({
     return (
         <div className="mypage">
             <section aria-labelledby="mypage-title" className="wizard-step-content">
-                <header className="wizard-heading">
+                <header className="wizard-heading mypage-heading">
+                    <p className="eyebrow">{t("eyebrow")}</p>
                     <h1 className="wizard-title" id="mypage-title">
                         {t("title")}
                     </h1>
@@ -231,7 +321,9 @@ export function MypageView({
                     </div>
                 )}
 
-                {view.kind === "ready" && <PassDetails locale={locale} pass={view.pass} />}
+                {view.kind === "ready" && (
+                    <PassDetails locale={locale} owner={owner} pass={view.pass} />
+                )}
             </section>
         </div>
     );
@@ -240,9 +332,11 @@ export function MypageView({
 function PassDetails({
     pass,
     locale,
+    owner,
 }: {
     readonly pass: MembershipPassData;
     readonly locale: SonariLocale;
+    readonly owner: string;
 }) {
     const t = useTranslations("mypage");
 
@@ -253,52 +347,175 @@ function PassDetails({
             : providerKeys.map((key) => t(`providerLabels.${key}`)).join(" + ");
 
     const date = (ms: number): string => formatTimestamp(ms, locale) ?? t("unset");
-    const identityLabelKey = identityStatusLabelKey(pass);
+
+    // 表示状態の確定値（CSS のトーン分岐と表示ラベルにだけ使う純粋な導出）。
+    const statusKey = statusLabelKey(pass.status);
+    const statusLabel = t(`statusLabels.${statusKey}`);
+    const isActive = statusKey === "active";
+    const identityLabel = t(`identityStatusLabels.${identityStatusLabelKey(pass)}`);
+    const isVerified = pass.identityVerified;
+    const walletText = owner.length > 0 ? shortAddress(owner) : t("pass.walletPlaceholder");
+
+    const statusPillClass = isActive
+        ? "mypage-status-pill mypage-status-pill--active"
+        : "mypage-status-pill";
+    const identityPillClass = isVerified
+        ? "mypage-identity-pill mypage-identity-pill--verified"
+        : "mypage-identity-pill";
+    const identityBadgeClass = isVerified ? "mypage-badge mypage-badge--verified" : "mypage-badge";
+    const passStatusClass = isActive
+        ? "mypage-pass-status mypage-pass-status--active"
+        : "mypage-pass-status";
 
     return (
-        <div className="mypage-groups">
-            <section className="mypage-group">
-                <h2>{t("claim.heading")}</h2>
-                <p>{t("claim.body")}</p>
-                <a className="btn btn-primary" href="/claim">
-                    {t("claim.cta")}
-                </a>
-            </section>
+        <div className="mypage-passport">
+            {/* 左カラム：パス＋クイック状態＋救済 CTA（デスクトップでは sticky） */}
+            <aside className="mypage-aside">
+                <div className="mypage-pass">
+                    <HexGlyph className="mypage-pass-watermark mypage-pass-watermark--lg" />
+                    <HexGlyph className="mypage-pass-watermark mypage-pass-watermark--sm" />
 
-            <section className="mypage-group">
-                <h2>{t("residence.heading")}</h2>
-                <dl>
-                    <dt>{t("residence.cellLabel")}</dt>
-                    <dd>{pass.homeCell}</dd>
-                    <dt>{t("residence.registeredAtLabel")}</dt>
-                    <dd>{date(pass.homeCellRegisteredAtMs)}</dd>
-                </dl>
-                <HomeCellMap cell={pass.homeCell} />
-            </section>
+                    <div className="mypage-pass-head">
+                        <span className="mypage-pass-brand">
+                            <span className="mypage-pass-logo">
+                                <HexGlyph className="mypage-pass-logo-glyph" />
+                            </span>
+                            Sonari
+                        </span>
+                        <span className={passStatusClass}>
+                            <span className="mypage-status-dot" />
+                            {statusLabel}
+                        </span>
+                    </div>
 
-            <section className="mypage-group">
-                <h2>{t("identity.heading")}</h2>
-                <dl>
-                    <dt>{t("identity.verifiedLabel")}</dt>
-                    <dd>{t(`identityStatusLabels.${identityLabelKey}`)}</dd>
-                    <dt>{t("identity.providerLabel")}</dt>
-                    <dd>{providerText}</dd>
-                    <dt>{t("identity.verifiedAtLabel")}</dt>
-                    <dd>{date(pass.identityVerifiedAtMs)}</dd>
-                    <dt>{t("identity.expiresAtLabel")}</dt>
-                    <dd>{date(pass.identityExpiresAtMs)}</dd>
-                </dl>
-            </section>
+                    <div className="mypage-pass-title">
+                        <span className="mypage-pass-kicker">{t("pass.kicker")}</span>
+                        <span className="mypage-pass-name">{t("pass.name")}</span>
+                        <span className="mypage-pass-subtitle">{t("pass.subtitle")}</span>
+                    </div>
 
-            <section className="mypage-group">
-                <h2>{t("status.heading")}</h2>
-                <dl>
-                    <dt>{t("status.stateLabel")}</dt>
-                    <dd>{t(`statusLabels.${statusLabelKey(pass.status)}`)}</dd>
-                    <dt>{t("status.issuedAtLabel")}</dt>
-                    <dd>{date(pass.issuedAtMs)}</dd>
-                </dl>
-            </section>
+                    <dl className="mypage-pass-fields">
+                        <div className="mypage-pass-field mypage-pass-field--wide">
+                            <dt>{t("pass.residenceLabel")}</dt>
+                            <dd className="mypage-mono">{pass.homeCell}</dd>
+                        </div>
+                        <div className="mypage-pass-field">
+                            <dt>{t("pass.walletLabel")}</dt>
+                            <dd className="mypage-mono">{walletText}</dd>
+                        </div>
+                        <div className="mypage-pass-field">
+                            <dt>{t("pass.networkLabel")}</dt>
+                            <dd className="mypage-mono">{t("pass.networkValue")}</dd>
+                        </div>
+                    </dl>
+                </div>
+
+                <div className="mypage-quickstatus">
+                    <div className="mypage-quickstatus-row">
+                        <span className="mypage-quickstatus-label">
+                            {t("quick.passStateLabel")}
+                        </span>
+                        <span className={statusPillClass}>
+                            <span className="mypage-status-dot" />
+                            {statusLabel}
+                        </span>
+                    </div>
+                    <div className="mypage-quickstatus-divider" />
+                    <div className="mypage-quickstatus-row">
+                        <span className="mypage-quickstatus-label">{t("quick.identityLabel")}</span>
+                        <span className={identityPillClass}>
+                            {isVerified ? <CheckGlyph className="mypage-pill-icon" /> : null}
+                            {identityLabel}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="mypage-relief">
+                    <div className="mypage-relief-head">
+                        <BoltGlyph className="mypage-relief-icon" />
+                        <span className="mypage-relief-title">{t("claim.heading")}</span>
+                    </div>
+                    <p className="mypage-relief-body">{t("claim.body")}</p>
+                    <a className="btn btn-primary" href="/claim">
+                        {t("claim.cta")}
+                    </a>
+                </div>
+            </aside>
+
+            {/* 右カラム：居住地・本人確認・オンチェーン台帳の詳細 */}
+            <div className="mypage-detail">
+                <section className="mypage-card">
+                    <header className="mypage-card-head">
+                        <span className="mypage-card-heading">
+                            <span className="mypage-card-icon">
+                                <PinGlyph className="mypage-card-icon-glyph" />
+                            </span>
+                            <h2 className="mypage-card-title">{t("residence.heading")}</h2>
+                        </span>
+                    </header>
+                    <div className="mypage-residence-body">
+                        <dl className="mypage-facts">
+                            <div className="mypage-fact">
+                                <dt>{t("residence.cellLabel")}</dt>
+                                <dd className="mypage-mono">{pass.homeCell}</dd>
+                            </div>
+                            <div className="mypage-fact">
+                                <dt>{t("residence.registeredAtLabel")}</dt>
+                                <dd>{date(pass.homeCellRegisteredAtMs)}</dd>
+                            </div>
+                        </dl>
+                        <HomeCellMap cell={pass.homeCell} />
+                    </div>
+                </section>
+
+                <section className="mypage-card">
+                    <header className="mypage-card-head">
+                        <span className="mypage-card-heading">
+                            <span className="mypage-card-icon">
+                                <PersonGlyph className="mypage-card-icon-glyph" />
+                            </span>
+                            <h2 className="mypage-card-title">{t("identity.heading")}</h2>
+                        </span>
+                        <span className={identityBadgeClass}>
+                            {isVerified ? <CheckGlyph className="mypage-pill-icon" /> : null}
+                            {identityLabel}
+                        </span>
+                    </header>
+                    <dl className="mypage-card-grid">
+                        <div className="mypage-fact">
+                            <dt>{t("identity.providerLabel")}</dt>
+                            <dd>{providerText}</dd>
+                        </div>
+                        <div className="mypage-fact">
+                            <dt>{t("identity.verifiedAtLabel")}</dt>
+                            <dd>{date(pass.identityVerifiedAtMs)}</dd>
+                        </div>
+                        <div className="mypage-fact">
+                            <dt>{t("identity.expiresAtLabel")}</dt>
+                            <dd>{date(pass.identityExpiresAtMs)}</dd>
+                        </div>
+                    </dl>
+                </section>
+
+                <section className="mypage-card">
+                    <p className="mypage-card-eyebrow">{t("status.onchainEyebrow")}</p>
+                    <div className="mypage-ledger-row">
+                        <span>{t("status.stateLabel")}</span>
+                        <span className={statusPillClass}>
+                            <span className="mypage-status-dot" />
+                            {statusLabel}
+                        </span>
+                    </div>
+                    <div className="mypage-ledger-row">
+                        <span>{t("status.issuedAtLabel")}</span>
+                        <strong>{date(pass.issuedAtMs)}</strong>
+                    </div>
+                    <div className="mypage-ledger-row">
+                        <span>{t("status.networkLabel")}</span>
+                        <strong className="mypage-mono">{t("status.networkValue")}</strong>
+                    </div>
+                </section>
+            </div>
         </div>
     );
 }
