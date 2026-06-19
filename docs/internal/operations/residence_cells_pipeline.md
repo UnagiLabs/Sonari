@@ -197,6 +197,39 @@ aws s3 sync \
   --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
 ```
 
+Earthquake TEE が使う residence tile manifest / tile shards も public R2 surface に置きます。
+TEE/EC2 runtime には Cloudflare credential を渡さず、public HTTPS URL、object key、manifest SHA-256、allowlist metadata だけを GitHub Actions Variables / CloudFormation Parameters に登録します。
+
+public R2 base URL は Cloudflare dashboard だけでなく、運用端末の `wrangler` でも確認します。custom domain を使う場合は bucket の public bucket domain ではなく、実際に配信する custom domain を `SONARI_RESIDENCE_R2_BASE_URL` に登録します。
+
+```bash
+wrangler r2 bucket domain get "$SONARI_R2_BUCKET"
+curl -fsS "${SONARI_RESIDENCE_R2_BASE_URL%/}/residence-cells/v1/res7/tiles/tile_manifest.json" \
+  -o .build/residence-cells/r2-tile-manifest.json
+```
+
+`SONARI_RESIDENCE_TILE_MANIFEST_SHA256` は、ローカル生成物ではなく、R2 にアップロード済みの正確な `tile_manifest.json` bytes から計算します。アップロード前のファイルや pretty-print し直した JSON から計算してはいけません。
+
+```bash
+SONARI_RESIDENCE_TILE_MANIFEST_SHA256="$(
+  sha256sum .build/residence-cells/r2-tile-manifest.json | awk '{print $1}'
+)"
+```
+
+GitHub environment `aws-sonari-verifier-runner-dev` / repo Variables に共有する値は次のとおりです。credential material は含めません。
+
+| variable | source |
+| --- | --- |
+| `SONARI_RESIDENCE_R2_BASE_URL` | `wrangler r2 bucket domain get` または Cloudflare dashboard で確認した public HTTPS base URL |
+| `SONARI_RESIDENCE_TILE_MANIFEST_KEY` | R2 上の `tile_manifest.json` object key |
+| `SONARI_RESIDENCE_TILE_MANIFEST_SHA256` | R2 から取得し直した manifest bytes の lowercase SHA-256 |
+| `SONARI_RESIDENCE_R2_OBJECT_PREFIX` | manifest と tile shard の共通 object prefix |
+| `SONARI_RESIDENCE_R2_BUCKET` | manifest metadata の bucket 名 |
+| `SONARI_RESIDENCE_ALLOWLIST_VERSION` | contract bootstrap と manifest metadata の allowlist version |
+| `SONARI_RESIDENCE_ROOT` | AllowedResidenceCellRegistry の Merkle root |
+| `SONARI_RESIDENCE_SOURCE_HASH` | 任意。Natural Earth source hash / allowlist source hash を evidence に残す場合だけ設定 |
+| `SONARI_GEO_RESOLUTION` | `7` |
+
 ### 7. R2 artifact を検証する
 
 R2 verification は、R2 から temp/build directory へ artifact を取得し直してから

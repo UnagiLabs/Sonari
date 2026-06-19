@@ -118,13 +118,14 @@ Inside the Nautilus enclave, the verifier:
 - checks that the event and its ShakeMap really exist;
 - turns the shaking values into map cells (using the H3 cell system);
 - adds up the intensity per cell in a fixed, repeatable way, and labels how strongly each cell was hit;
+- fetches the public residence tile manifest and tile shards, then counts only the affected cells that are on the residence land allowlist;
 - builds one short fingerprint of all affected cells (the `affected_cells_root`);
 - writes an evidence list pointing to the source and generated files;
 - signs the final earthquake result.
 
 The evidence list points to archived files. Sonari stores them on **Walrus**, where each file is addressed by its own content — so if any byte is changed, the stored hash no longer matches and the change is caught. Walrus does not decide what the result *means*; it just makes the files tamper-evident. At claim time, per-area proofs are checked against the `affected_cells_root`.
 
-Only a `finalized` earthquake result can be sent to Sui. Other states (such as "waiting for source", "rejected", "too small", or "failed") stay off-chain and are never submitted as accepted disaster events.
+Only a `finalized` earthquake result can be sent to Sui. Other states (such as "waiting for source", "rejected", "too small", or "failed") stay off-chain and are never submitted as accepted disaster events. If the ShakeMap affected area contains only water cells, the enclave returns `SEA_ONLY_AFFECTED_CELLS`; no signed payload is produced.
 
 ### Identity Verification
 
@@ -180,6 +181,7 @@ This section keeps the exact values, in case you need them.
 - **Identity signing intent:** `SONARI_IDENTITY_VERIFICATION_V1`.
 - **Verifier kinds:** `earthquake` and `membership_identity` (`common/contracts`).
 - **Relayer modes (earthquake):** `build-request` (preview), `dry-run`, and `submit`.
+- **Affected count semantics:** `affected_cells_root` covers the full affected cells artifact; the signed `affected_cell_count` is only the residence-land subset counted inside the enclave.
 - **Proof artifacts:** the affected-cells proof Worker verifies the Walrus file (hash / root / schema), builds Merkle proofs, and stores them on R2; the security-critical check is the Merkle root/proof replay against `affected_cells_root`.
 
 ## Where to Read More
