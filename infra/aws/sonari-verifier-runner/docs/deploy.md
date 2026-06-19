@@ -99,10 +99,9 @@ MEMBERSHIP_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/membership-identity-tee-artifa
 MEMBERSHIP_EIF_SHA256="$(sha256sum dist/aws/membership-identity-tee.eif | cut -d ' ' -f 1)"
 CENSUS_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/census-tee-artifact.tar.gz.sha256)"
 CENSUS_EIF_SHA256="$(sha256sum dist/aws/census-tee.eif | cut -d ' ' -f 1)"
-SONARI_RESIDENCE_TILE_MANIFEST_SHA256="$(
-  curl -fsS "${SONARI_RESIDENCE_R2_BASE_URL%/}/$SONARI_RESIDENCE_TILE_MANIFEST_KEY" \
-    | sha256sum | awk '{print $1}'
-)"
+: "${SONARI_RESIDENCE_TILE_MANIFEST_SHA256:?}"
+# Use the value computed from exact tile_manifest.json bytes fetched back from R2
+# after upload. Do not recompute this value from the public distribution URL.
 
 pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --commit-sha "$COMMIT_SHA" \
