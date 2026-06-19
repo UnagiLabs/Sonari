@@ -1108,6 +1108,85 @@ describe("AWS runner workflow helper", () => {
         expect(relayer).toMatchObject({ relayer: "skipped" });
     });
 
+    it("accepts sea-only rejected results and skips archive relayer and floor census", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = {
+            status: "rejected",
+            source_event_id: "us7000sonari",
+            error_code: "SEA_ONLY_AFFECTED_CELLS",
+        } as const;
+        const bytes = new TextEncoder().encode("source bytes");
+        const sourceArchive = new RecordingSourceArchiveAdapter(bytes);
+        const relayer = new RecordingRelayerAdapter();
+        const floorCensus = new RecordingFloorCensusAdapter();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client({ body: JSON.stringify(result) }),
+            repository,
+            sourceArchive,
+            relayer,
+            floorCensus,
+            now: () => 1_800_000_001_000,
+            config: baseConfig(),
+        });
+
+        const applied = await handler({
+            action: "apply_result",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            instance_id: "i-123",
+            result_s3_key: "results/us7000sonari/cmd-123.json",
+        });
+        const archived = await handler({
+            action: "archive_sources",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            instance_id: "i-123",
+            result,
+        } as never);
+        const relayed = await handler({
+            action: "relayer_preview_or_dry_run",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            result,
+        } as never);
+        const census = await handler({
+            action: "run_floor_census",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            result_s3_key: "results/us7000sonari/cmd-123.json",
+            relayer_success: {
+                mode: "submit",
+                digest: "tx-digest",
+                objectId: "0xdisaster",
+            },
+        });
+
+        expect(applied).toMatchObject({ result_status: "rejected" });
+        expect(archived).toMatchObject({ source_archive: "skipped" });
+        expect(relayed).toMatchObject({ relayer: "skipped" });
+        expect(census).toMatchObject({ floor_census: "skipped" });
+        expect(sourceArchive.fetches).toEqual([]);
+        expect(sourceArchive.puts).toEqual([]);
+        expect(relayer.inputs).toEqual([]);
+        expect(floorCensus.inputs).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "rejected",
+            error_code: "SEA_ONLY_AFFECTED_CELLS",
+            source_archive_status: "skipped",
+            relayer_status: null,
+            floor_census_status: "skipped",
+        });
+    });
+
     it("stores only a compact finalized result summary in DynamoDB state", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
@@ -3054,6 +3133,12 @@ function finalizedResultWithRawManifest(
             hash: affectedCellsHash,
             root: affectedCellsRoot,
             count: 1,
+            total_cell_count: 1,
+            land_cell_count: 1,
+            water_cell_count: 0,
+            land_allowlist_version: 0,
+            land_allowlist_root: `0x${"00".repeat(32)}`,
+            land_classifier: "all_affected_cells_land_compat_v1",
             geo_resolution: 7,
         },
     };

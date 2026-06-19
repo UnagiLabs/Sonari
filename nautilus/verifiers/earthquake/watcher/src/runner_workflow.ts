@@ -1159,6 +1159,21 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 }
                 try {
                     const result = await readTeeResultFromS3(options, event);
+                    if (result.status !== "finalized") {
+                        await repository.markFloorCensusResult(
+                            event.source_event_id,
+                            { status: "skipped", message: "TEE result is not finalized" },
+                            nowMs,
+                            event.attempt,
+                        );
+                        return retainVerifierKind({
+                            source_event_id: event.source_event_id,
+                            attempt: event.attempt,
+                            floor_census: "skipped",
+                            result_s3_key: event.result_s3_key,
+                            result_status: result.status,
+                        });
+                    }
                     const floorCensus =
                         options.floorCensus ??
                         (await buildCensusTeeFloorCensusFromConfig(options, event, nowMs));
