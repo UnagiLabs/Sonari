@@ -4123,6 +4123,24 @@ h4 {
   }
 }
 
+/*
+ * membership ステップの contained ワイドレイアウト modifier。
+ * Claude Design の "Membership Step" はデスクトップで「パス｜台帳」の 2 カラムを見せる。
+ * residence と同じく中央寄せのまま最大 960px まで breakout し、880px 未満では通常の
+ * shell 幅（720px）・1 カラムに戻して他ステップと左右マージンをそろえる。
+ * .wizard-shell / .page / .wizard-stage の本体ルールは変更しない。
+ */
+.wizard-step-content--membership {
+  gap: 24px;
+}
+
+@media (min-width: 880px) {
+  .wizard-step-content--membership {
+    width: min(960px, calc(100dvw - 32px));
+    margin-left: calc(50% - min(480px, 50dvw - 16px));
+  }
+}
+
 /* 確定操作（エラー・CTA・ヒント）。contained 幅の下部に上罫線付きで配置する。 */
 .residence-cta {
   display: grid;
@@ -4408,6 +4426,404 @@ h4 {
   text-align: center;
   color: var(--ink-faint);
   font-size: 13px;
+}
+
+/* ============ Membership ステップ（/register?step=membership） ============
+ * Claude Design の "Membership Step" から取り込んだ視覚言語。発行されるソウルバウンド
+ * パス（グラデーション）と、特典リスト＋オンチェーン記録の台帳を並べる。デスクトップは
+ * 2 カラム（パス｜台帳）、モバイルは縦積み。見た目だけの変更で、SBT 照会・発行・ゲート
+ * 判定・段階別エラーなどの機能は membership-step.tsx / membership-gate 側で不変。
+ * 色・影・角丸・フォントはすべて既存のデザイントークンに揃える。 */
+
+/* 見出しは左寄せ（このステップのみ。共有 .wizard-heading は中央寄せのまま）。 */
+.wizard-membership-heading {
+  justify-items: start;
+  text-align: left;
+  gap: 8px;
+}
+
+.wizard-membership-heading .wizard-lead {
+  max-width: 64ch;
+}
+
+.membership-grid {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+@media (min-width: 880px) {
+  .membership-grid {
+    grid-template-columns: 348px minmax(0, 1fr);
+  }
+}
+
+/* 発行されるソウルバウンドパス（ビジュアル）。 */
+.membership-pass {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 320px;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(160deg, var(--sage-700), var(--sage-900));
+  box-shadow: 0 16px 40px oklch(0.3 0.04 150 / 0.3);
+  color: var(--sage-50);
+}
+
+@media (min-width: 880px) {
+  .membership-pass {
+    justify-content: space-between;
+  }
+}
+
+/* 背景の透かし六角形（装飾）。 */
+.membership-pass-watermark {
+  position: absolute;
+  color: #fff;
+}
+
+.membership-pass-watermark--lg {
+  top: -56px;
+  right: -66px;
+  width: 240px;
+  height: 240px;
+  opacity: 0.1;
+}
+
+.membership-pass-watermark--sm {
+  bottom: -50px;
+  left: -40px;
+  width: 150px;
+  height: 150px;
+  opacity: 0.06;
+}
+
+.membership-pass-watermark polygon {
+  stroke-width: 0.8;
+}
+
+.membership-pass-head,
+.membership-pass-title,
+.membership-pass-fields {
+  position: relative;
+}
+
+.membership-pass-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.membership-pass-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-serif);
+  font-size: 21px;
+}
+
+.membership-pass-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: oklch(0.97 0.012 145 / 0.16);
+}
+
+.membership-pass-logo-glyph {
+  width: 14px;
+  height: 14px;
+}
+
+.membership-pass-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.membership-pass-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.membership-pass-badge-icon {
+  width: 10px;
+  height: 10px;
+}
+
+.membership-pass-badge--issued {
+  background: oklch(0.97 0.012 145 / 0.92);
+  color: var(--sage-900);
+  font-weight: 700;
+}
+
+.membership-pass-badge--sbt {
+  background: oklch(0.97 0.012 145 / 0.16);
+}
+
+.membership-pass-kicker {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.membership-pass-name {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-serif);
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.membership-pass-subtitle {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  opacity: 0.74;
+}
+
+.membership-pass-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 30px;
+  margin: 0;
+}
+
+.membership-pass-field {
+  margin: 0;
+}
+
+.membership-pass-field--wide {
+  flex-basis: 100%;
+}
+
+.membership-pass-field dt {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.membership-pass-field dd {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* 台帳カラム（特典 ＋ オンチェーン記録 ＋ プライバシー）。 */
+.membership-ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.membership-subhead,
+.membership-onchain-head {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.membership-subhead {
+  margin-bottom: 12px;
+}
+
+.membership-benefit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.membership-benefit {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+
+.membership-benefit-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--sage-100);
+  color: var(--sage-700);
+}
+
+.membership-benefit-glyph {
+  width: 16px;
+  height: 16px;
+}
+
+.membership-benefit strong {
+  display: block;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.membership-benefit small {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
+/* オンチェーン記録テーブル。 */
+.membership-onchain {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.membership-onchain-head {
+  padding: 12px 18px;
+  background: var(--sage-50);
+  border-bottom: 1px solid var(--line);
+}
+
+.membership-onchain-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.membership-onchain-row:last-child {
+  border-bottom: 0;
+}
+
+.membership-onchain-row span {
+  font-size: 13.5px;
+  color: var(--ink-muted);
+}
+
+.membership-onchain-row strong {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: right;
+}
+
+/* 居住セルはデザイン通り monospace で表示する（.mono-value はグローバル未定義のため）。 */
+.membership-onchain-row strong.mono-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.membership-onchain-cost {
+  font-weight: 700;
+  color: var(--sage-700);
+}
+
+/* プライバシーノート（サージュ淡色チップ）。 */
+.membership-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--sage-100);
+  color: var(--sage-800);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.membership-privacy-icon {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  color: var(--sage-700);
+}
+
+/* CTA 行：ヒント／確定フラグを左、ボタンを右に寄せる（モバイルは折り返し中央）。 */
+.membership-cta {
+  justify-content: center;
+}
+
+.membership-gasfree-hint,
+.membership-issued-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+
+.membership-gasfree-hint {
+  color: var(--ink-muted);
+}
+
+.membership-gasfree-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--sage-700);
+}
+
+.membership-issued-flag {
+  font-weight: 600;
+  color: var(--sage-700);
+}
+
+.membership-issued-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--sage-700);
+}
+
+.membership-issued-check-icon {
+  width: 12px;
+  height: 12px;
+  color: #fff;
+}
+
+@media (min-width: 720px) {
+  .membership-cta {
+    justify-content: flex-end;
+  }
+
+  .membership-gasfree-hint,
+  .membership-issued-flag {
+    margin-right: auto;
+  }
 }
 
 /* ============ Consent ステップ（/register?step=consent） ============

@@ -144,42 +144,64 @@
                 }
             },
             "membership": {
-                "title": "Issue your Membership SBT.",
-                "lead": "Choose your residence first, then issue one soulbound membership per wallet. It cannot be transferred, and holding it does not guarantee aid or payout priority.",
-                "card": {
-                    "objectType": "Object type",
-                    "objectTypeValue": "Membership SBT",
-                    "owner": "Owner",
-                    "ownerPlaceholder": "Your connected wallet",
+                "eyebrow": "Membership",
+                "title": "Review your Membership.",
+                "lead": "Here's the pass that will be issued and exactly what's written on-chain. Nothing else leaves your device.",
+                "pass": {
+                    "kicker": "Membership",
+                    "name": "Soulbound pass",
+                    "subtitle": "Non-transferable · bound to your wallet",
+                    "issuedBadge": "Issued",
+                    "sbtBadge": "SBT",
+                    "residenceLabel": "Residence cell",
+                    "residencePlaceholder": "Not selected",
+                    "walletLabel": "Wallet",
+                    "walletPlaceholder": "Not connected",
+                    "networkLabel": "Network",
+                    "networkValue": "Sui"
+                },
+                "benefits": {
+                    "label": "Included with membership",
+                    "relief": {
+                        "title": "Relief Cash eligibility",
+                        "body": "Eligible for payouts when a disaster is declared in your residence cell."
+                    },
+                    "pass": {
+                        "title": "One soulbound pass",
+                        "body": "Bound to your wallet — it can't be sold, transferred or delegated."
+                    },
+                    "free": {
+                        "title": "Free to issue",
+                        "body": "Gas is sponsored by Sonari. You'll never be charged to register."
+                    }
+                },
+                "onchain": {
+                    "label": "Recorded on-chain",
+                    "type": "Type",
+                    "typeValue": "Soulbound Membership (SBT)",
                     "residence": "Residence cell",
                     "residencePlaceholder": "Not selected",
-                    "transfer": "Transfer",
-                    "transferValue": "Disabled",
-                    "status": "Status",
-                    "statusValue": "Not issued yet",
-                    "statusChecking": "Checking",
-                    "statusReady": "Ready to issue",
-                    "statusIssued": "Issued",
-                    "statusSubmitting": "Submitting",
-                    "statusMultiple": "Multiple detected"
+                    "network": "Network",
+                    "networkValue": "Sui",
+                    "cost": "Cost",
+                    "costValue": "Free · sponsored"
                 },
+                "privacy": "Your exact address and GPS history never leave your device or get stored.",
+                "gasFreeHint": "No gas fee — sponsored by Sonari · ~2s",
+                "issuedFlag": "Membership issued — written to Sui.",
                 "issue": {
-                    "button": "Issue Membership SBT",
-                    "buttonIssued": "Continue",
+                    "button": "Issue my Membership",
+                    "buttonIssued": "Continue to Identity",
                     "connectWallet": "Connect a wallet to issue your Membership SBT.",
                     "residenceRequired": "Select your residence area before issuing.",
                     "ready": "Ready to issue the Membership SBT for this residence.",
                     "checking": "Checking whether this wallet already has a Membership SBT…",
                     "alreadyIssued": "This wallet already has a Membership SBT. Continue to the next step.",
                     "submitting": "Approve the transaction in your wallet.",
-                    "sponsorNoteTitle": "Sonari sponsors the first Membership SBT gas.",
-                    "sponsorNoteBody": "The Membership SBT is issued to the connected Sui address for this residence cell.",
-                    "signatureNote": "You still review and sign the sponsored transaction in your wallet before it is sent.",
                     "preparing": "Preparing your Membership SBT transaction.",
                     "sponsoring": "Preparing a gasless Membership SBT transaction.",
                     "signing": "Approve the sponsored Membership SBT transaction in your wallet.",
                     "executing": "Issuing your Membership SBT on chain.",
-                    "issued": "Membership SBT issued.",
                     "notConfigured": "Membership issuance is not configured.",
                     "lookupFailed": "Could not look up your Membership SBT.",
                     "multiple": "Multiple Membership SBTs were found for this wallet. Contact support before continuing.",
