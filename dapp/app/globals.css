@@ -4356,6 +4356,242 @@ h4 {
   font-size: 13px;
 }
 
+/* ============ Consent ステップ（/register?step=consent） ============
+ * Claude Design の "Consent Step" から取り込んだ視覚言語。番号付きセクション、
+ * 平易な要約カード、ボタン行型の同意チェックを既存トークンで再構成する。
+ * 見た目だけの変更で、同意ゲートや遷移などの機能は consent-step.tsx 側で不変。 */
+.wizard-consent {
+  counter-reset: consent-section;
+}
+
+.consent-section {
+  counter-increment: consent-section;
+}
+
+/* セクション見出し：mono の連番（01 / 02 …）＋ラベル。連番は DOM 順で自動採番。
+   規約全文セクションは右側に meta／読了バッジを置くため折り返しを許可する。 */
+.consent-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  row-gap: 6px;
+  margin: 0 0 14px;
+}
+
+.consent-section-no::before {
+  content: counter(consent-section, decimal-leading-zero);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sage-700);
+}
+
+.consent-section-label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--sage-900);
+}
+
+/* 平易な要約：デスクトップは 3 カラム、狭い画面では 1 カラムに積む。 */
+.consent-summary-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+  .consent-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.consent-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 18px 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.consent-summary-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--sage-100);
+  color: var(--sage-700);
+}
+
+.consent-summary-glyph {
+  width: 20px;
+  height: 20px;
+}
+
+.consent-summary-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.3;
+  color: var(--sage-900);
+}
+
+.consent-summary-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
+/* 規約全文：固定高のスクロール枠＋下端フェード。読了でフェードを消す。 */
+.consent-doc-meta {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+
+.consent-doc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: var(--sage-100);
+  color: var(--sage-800);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.consent-doc-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.consent-doc {
+  position: relative;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.consent-doc-scroll {
+  height: 300px;
+  overflow-y: auto;
+  padding: 22px 24px 26px;
+}
+
+@media (max-width: 640px) {
+  .consent-doc-scroll {
+    height: 240px;
+    padding: 18px 16px 20px;
+  }
+}
+
+.consent-doc-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.consent-doc-scroll::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 99px;
+  border: 3px solid var(--surface-soft);
+}
+
+.consent-doc-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.consent-clause + .consent-clause {
+  margin-top: 18px;
+}
+
+.consent-clause-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 5px;
+}
+
+.consent-clause-no {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--sage-700);
+}
+
+.consent-clause-heading {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--sage-900);
+}
+
+.consent-clause-body {
+  margin: 0 0 0 30px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 640px) {
+  .consent-clause-body {
+    margin-left: 24px;
+    font-size: 12.5px;
+  }
+}
+
+.consent-doc-end {
+  margin: 18px 0 0 30px;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--ink-faint);
+}
+
+.consent-doc-fade {
+  position: absolute;
+  left: 0;
+  right: 10px;
+  bottom: 0;
+  height: 46px;
+  background: linear-gradient(to top, var(--surface-soft), transparent);
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.consent-doc-fade.is-hidden {
+  opacity: 0;
+}
+
+/* 同意チェック：ラベル＋補足の 2 行。terms-row パターンを踏襲する。 */
+.terms-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wizard-consent .terms-row-label {
+  font-weight: 600;
+}
+
+.terms-row-detail {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
 .locale-switcher {
   display: inline-flex;
   gap: 2px;
