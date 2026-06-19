@@ -1,4 +1,6 @@
 const README: &str = include_str!("../README.md");
+const OPERATIONS_RUNBOOK: &str =
+    include_str!("../../../docs/internal/operations/residence_cells_pipeline.md");
 
 #[test]
 fn readme_documents_r2_proof_shard_operations() {
@@ -84,8 +86,40 @@ fn readme_documents_tile_operations() {
     ]);
 }
 
+#[test]
+fn readme_documents_operations_tile_publication_safety() {
+    assert_required_operations_terms([
+        "sonari-residence-proofs-v1-res7",
+        "aws s3 sync --dryrun --delete",
+        "aws s3 cp",
+        "R2 exact bytes",
+        "prefix parity",
+        "余剰 `res4/*.json`",
+        "SONARI_RESIDENCE_TILE_MANIFEST_SHA256",
+        "lowercase 64 hex",
+    ]);
+
+    assert_required_operations_terms([
+        "aws-sonari-verifier-runner-dev",
+        "environment Variables",
+        "repo-level Variables",
+        "SONARI_RESIDENCE_ROOT",
+        "SONARI_GEO_RESOLUTION",
+        "gh variable list --env aws-sonari-verifier-runner-dev",
+    ]);
+}
+
 fn assert_required_terms<const N: usize>(terms: [&str; N]) {
     for term in terms {
         assert!(README.contains(term), "README must contain {term:?}");
+    }
+}
+
+fn assert_required_operations_terms<const N: usize>(terms: [&str; N]) {
+    for term in terms {
+        assert!(
+            OPERATIONS_RUNBOOK.contains(term),
+            "operations runbook must contain {term:?}",
+        );
     }
 }
