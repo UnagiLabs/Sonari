@@ -49,21 +49,59 @@
                 }
             },
             "consent": {
+                "eyebrow": "Agreement",
                 "title": "Review and agree",
-                "lead": "Please read the items below. You can continue once you agree to all of them.",
-                "residenceTitle": "Residence area",
-                "membershipTitle": "Membership SBT",
-                "residence": {
-                    "0": "On the next step I will choose the area where I currently live, and Sonari uses that area to check my eligibility.",
-                    "1": "If I change my residence area after a disaster's deadline, the change will not count for that disaster.",
-                    "2": "Sonari saves only the residence area I choose (a small zone on the map), not my exact address or location history."
+                "lead": "Before your Membership SBT is issued, here's what you're agreeing to — in plain language, then in full. One consent is required to continue.",
+                "plainLanguageLabel": "In plain language",
+                "summary": {
+                    "0": {
+                        "title": "Recorded on-chain",
+                        "body": "Your H3 residence cell and a soulbound Membership pass are written to Sui — public and permanent."
+                    },
+                    "1": {
+                        "title": "Private by default",
+                        "body": "Your exact address, GPS history and identity documents never leave your device or get stored."
+                    },
+                    "2": {
+                        "title": "One per person",
+                        "body": "A single Membership SBT per person. Relief Cash requires identity verification before payout."
+                    }
                 },
-                "membership": {
-                    "0": "When I continue, the wallet I connect will receive one Sonari Membership SBT, and each wallet can hold only one.",
-                    "1": "The Membership SBT is soulbound, which means it cannot be transferred or sold to anyone else.",
-                    "2": "Holding a Membership SBT does not guarantee that I will receive aid, and it gives no priority for payouts."
+                "fullAgreementLabel": "The full agreement",
+                "agreementMeta": "Scroll to read · v{version}",
+                "readToEnd": "Read to the end",
+                "clauses": {
+                    "0": {
+                        "heading": "Eligibility & membership",
+                        "body": "Sonari Membership is granted as a non-transferable, soulbound token (SBT) bound to your connected wallet. You may hold only one active Membership and agree not to create duplicate accounts to claim relief more than once."
+                    },
+                    "1": {
+                        "heading": "Residence data",
+                        "body": "Only the H3 cell (resolution 7) you select is recorded on-chain to determine disaster eligibility. Your precise address, coordinates and location history are processed locally and are never transmitted to or stored by Sonari."
+                    },
+                    "2": {
+                        "heading": "Relief Cash & verification",
+                        "body": "Membership alone does not entitle you to funds. Before any Relief Cash payout you must complete identity verification. Sonari may withhold or reverse distributions where duplicate or fraudulent claims are detected."
+                    },
+                    "3": {
+                        "heading": "Soulbound token",
+                        "body": "Your Membership SBT cannot be sold, transferred or delegated. Network costs for issuing it are sponsored by Sonari; you will not be charged gas to register."
+                    },
+                    "4": {
+                        "heading": "Data & privacy",
+                        "body": "Sonari processes the minimum data needed to operate the relief program. Search text entered in the residence step may be sent to a third-party map provider. See the Privacy Policy for retention and your rights."
+                    },
+                    "5": {
+                        "heading": "Liability & changes",
+                        "body": "The service is provided on an “as is” basis. Sonari may update these terms; material changes will be surfaced at your next sign-in. Continued use constitutes acceptance of the current version."
+                    }
                 },
-                "agreeAll": "I agree to all of the above."
+                "agreementEnd": "End of agreement — Sonari Foundation, terms version {version}.",
+                "consentLabel": "Your consent",
+                "agreeLabel": "I have read and agree to the Sonari Terms of Service and Membership Agreement.",
+                "agreeDetail": "I consent to my H3 residence cell being recorded on-chain, confirm I am registering only one Membership, and understand my exact address and GPS history are never stored.",
+                "gateHint": "Check the box to confirm and continue.",
+                "continueCta": "Agree & continue"
             },
             "residence": {
                 "title": "Choose your residence area.",
