@@ -40,7 +40,122 @@ const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID
 const signedStatementHash = computeIdentityStatementHash(MEMBERSHIP_TERMS_VERSION);
 
 const IDENTITY_STATEMENT_COUNT = 3;
-const identityProviderIds: readonly IdentityProvider[] = ["kyc", "world_id"];
+
+// 確認方法カードのアイコン。色は CSS（currentColor / stroke 指定）に従い、サイズは
+// 配置先のスタイルで制御する。見た目だけの装飾なので aria-hidden にする。
+function ProviderIcon({ provider }: { readonly provider: IdentityProvider }) {
+    if (provider === "kyc") {
+        return (
+            <svg aria-hidden="true" className="identity-choice-glyph" viewBox="0 0 24 24">
+                <rect
+                    fill="none"
+                    height="14"
+                    rx="2.5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    width="18"
+                    x="3"
+                    y="5"
+                />
+                <circle
+                    cx="8.5"
+                    cy="11"
+                    fill="none"
+                    r="2.2"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                />
+                <line
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeWidth="1.8"
+                    x1="13"
+                    x2="18"
+                    y1="9.5"
+                    y2="9.5"
+                />
+                <line
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeWidth="1.8"
+                    x1="13"
+                    x2="16.5"
+                    y1="13"
+                    y2="13"
+                />
+            </svg>
+        );
+    }
+    return (
+        <svg aria-hidden="true" className="identity-choice-glyph" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" strokeWidth="1.8" />
+            <path
+                d="M3 12h18M12 3c2.6 2.4 2.6 15.6 0 18M12 3c-2.6 2.4-2.6 15.6 0 18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+            />
+        </svg>
+    );
+}
+
+// 任意ステップであることを伝えるインフォメーションアイコン。
+function NoticeIcon() {
+    return (
+        <svg aria-hidden="true" className="identity-notice-glyph" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" strokeWidth="2" />
+            <line
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeWidth="2"
+                x1="12"
+                x2="12"
+                y1="11"
+                y2="16.5"
+            />
+            <circle cx="12" cy="7.6" fill="currentColor" r="1.3" />
+        </svg>
+    );
+}
+
+// 重複アカウント確認のカスタムチェックボックス内に表示するチェックマーク。
+function StatementCheckIcon() {
+    return (
+        <svg aria-hidden="true" className="terms-row-check" viewBox="0 0 24 24">
+            <path
+                d="M20 6 9 17l-5-5"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="3.5"
+            />
+        </svg>
+    );
+}
+
+// メンバーシップ検出カードの六角形＋チェックのアイコン。
+function MembershipIcon() {
+    return (
+        <svg aria-hidden="true" className="identity-membership-glyph" viewBox="0 0 24 24">
+            <polygon
+                fill="currentColor"
+                fillOpacity="0.14"
+                points="12,2.5 20,7 20,17 12,21.5 4,17 4,7"
+                stroke="currentColor"
+                strokeWidth="1.8"
+            />
+            <path
+                d="M9 12l2 2 4-4.5"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.8"
+            />
+        </svg>
+    );
+}
 
 type SubmitState =
     | { readonly status: "idle" }
@@ -175,6 +290,15 @@ export function IdentityStep({
         };
     }, [owner, client]);
 
+    // KYC は現在 "Coming soon"（選択不可）。永続化された wizard 状態が古い "kyc"
+    // を持っていても、UI 上の唯一の確認方法である World ID に正規化しておく。
+    // 送信ロジック自体（runSubmit の KYC 経路）は将来の再有効化に備えて残す。
+    useEffect(() => {
+        if (provider === "kyc") {
+            onProviderChange("world_id");
+        }
+    }, [provider, onProviderChange]);
+
     function handleProviderChange(next: IdentityProvider) {
         onProviderChange(next);
         setWorldIdResponse(null);
@@ -266,46 +390,70 @@ export function IdentityStep({
     }
 
     return (
-        <section aria-labelledby="wizard-identity-title" className="wizard-step-content">
-            <header className="wizard-heading">
+        <section
+            aria-labelledby="wizard-identity-title"
+            className="wizard-step-content wizard-identity"
+        >
+            <header className="wizard-heading wizard-identity-heading">
+                <p className="eyebrow">{t("eyebrow")}</p>
                 <h1 className="wizard-title" id="wizard-identity-title">
                     {t("title")}
                 </h1>
                 <p className="wizard-lead">{t("lead")}</p>
             </header>
 
-            <div className="field-note" role="note">
-                {t("optionalNotice")}
+            <div className="identity-notice" role="note">
+                <NoticeIcon />
+                <span>{t("optionalNotice")}</span>
             </div>
 
             <form className="wizard-identity-form" onSubmit={handleSubmit}>
-                <fieldset className="control-group">
+                <fieldset className="control-group identity-section">
                     <legend>{t("routeLegend")}</legend>
                     <div className="identity-choice-list">
-                        {identityProviderIds.map((optionId) => (
-                            <label className="identity-choice" key={optionId}>
-                                <input
-                                    checked={provider === optionId}
-                                    name="identityProvider"
-                                    onChange={() => handleProviderChange(optionId)}
-                                    type="radio"
-                                    value={optionId}
-                                />
-                                <span>
-                                    <strong>{t(`options.${optionId}.label`)}</strong>
-                                    <small>{t(`options.${optionId}.description`)}</small>
+                        {/* KYC は現在 Coming soon（選択不可）。ラジオを持たない静的カード。 */}
+                        <div
+                            aria-disabled="true"
+                            className="identity-choice identity-choice--disabled"
+                        >
+                            <span className="identity-choice-head">
+                                <span className="identity-choice-icon" aria-hidden="true">
+                                    <ProviderIcon provider="kyc" />
                                 </span>
-                            </label>
-                        ))}
+                                <strong>{t("options.kyc.label")}</strong>
+                                <span className="identity-choice-soon">
+                                    {tCommon("comingSoon")}
+                                </span>
+                            </span>
+                            <small>{t("options.kyc.description")}</small>
+                        </div>
+
+                        <label className="identity-choice">
+                            <input
+                                checked={provider === "world_id"}
+                                name="identityProvider"
+                                onChange={() => handleProviderChange("world_id")}
+                                type="radio"
+                                value="world_id"
+                            />
+                            <span className="identity-choice-head">
+                                <span className="identity-choice-icon" aria-hidden="true">
+                                    <ProviderIcon provider="world_id" />
+                                </span>
+                                <strong>{t("options.world_id.label")}</strong>
+                                <span className="identity-choice-radio" aria-hidden="true" />
+                            </span>
+                            <small>{t("options.world_id.description")}</small>
+                        </label>
                     </div>
                 </fieldset>
 
-                <fieldset className="control-group">
+                <fieldset className="control-group identity-section">
                     <legend>{t("membershipLegend")}</legend>
                     <MembershipBindingStatus lookup={lookup} owner={owner} />
                 </fieldset>
 
-                <fieldset className="control-group">
+                <fieldset className="control-group identity-section">
                     <legend>{t("statementsLegend")}</legend>
                     <div className="terms-list">
                         {acceptedStatements.map((checked, index) => (
@@ -322,14 +470,17 @@ export function IdentityStep({
                                     }
                                     type="checkbox"
                                 />
-                                <span>{t(`statements.${index}`)}</span>
+                                <span className="terms-row-box" aria-hidden="true">
+                                    <StatementCheckIcon />
+                                </span>
+                                <span className="terms-row-label">{t(`statements.${index}`)}</span>
                             </label>
                         ))}
                     </div>
                 </fieldset>
 
                 {provider === "world_id" ? (
-                    <fieldset className="control-group">
+                    <fieldset className="control-group identity-section">
                         <legend>{t("worldIdLegend")}</legend>
                         <WorldIdVerifyButton
                             membershipId={membershipId}
@@ -410,10 +561,23 @@ function MembershipBindingStatus({
 
     if (lookup.kind === "ok") {
         return (
-            <div className="field-note" role="status">
-                <strong>{t("detectedTitle")}</strong>
-                <span>{shortAddress(lookup.membershipId)}</span>
-                <small>{t("detectedBody")}</small>
+            <div className="identity-membership-card" role="status">
+                <span className="identity-membership-icon" aria-hidden="true">
+                    <MembershipIcon />
+                </span>
+                <div className="identity-membership-body">
+                    <div className="identity-membership-headline">
+                        <strong>{t("detectedTitle")}</strong>
+                        <span className="identity-membership-badge">
+                            <span className="identity-membership-pulse" aria-hidden="true" />
+                            {t("bound")}
+                        </span>
+                    </div>
+                    <span className="identity-membership-id">
+                        {shortAddress(lookup.membershipId)}
+                    </span>
+                    <small>{t("detectedBody")}</small>
+                </div>
             </div>
         );
     }

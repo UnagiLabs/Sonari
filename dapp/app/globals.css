@@ -2586,60 +2586,484 @@ h4 {
   font-size: 13px;
 }
 
-.identity-choice-list,
-.terms-list {
-  display: grid;
-  gap: 10px;
+/* ============================================================
+ * Identity ステップ（/register?step=identity）の視覚デザイン。
+ * レイアウト・配色・角丸・影はすべて既存トークンに揃える。機能（provider 選択・
+ * statement の承認・World ID 検証・CTA）は identity-step.tsx 側で従来どおり。
+ * ============================================================ */
+
+/* 見出しは左寄せ（このステップのみ。共有 .wizard-heading は中央寄せのまま）。 */
+.wizard-identity-heading {
+  justify-items: start;
+  text-align: left;
 }
 
-.identity-choice,
-.terms-row {
-  display: grid;
-  align-items: start;
-  gap: 12px;
-  grid-template-columns: auto 1fr;
-  padding: 16px;
-  border: 1px solid var(--line);
+.wizard-identity-heading .wizard-lead {
+  margin-top: 2px;
+}
+
+/* 任意ステップであることのインフォメーション。 */
+.identity-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px 16px;
+  border: 1px solid var(--sage-200);
   border-radius: var(--radius-md);
-  background: var(--surface-soft);
+  background: var(--sage-50);
+  color: var(--sage-800);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.identity-notice-glyph {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  color: var(--sage-700);
+}
+
+/* セクション見出しに 01 / 02 … の連番を付ける（DOM 順で自動採番）。 */
+.wizard-identity-form {
+  counter-reset: identity-section;
+}
+
+.identity-section > legend {
+  counter-increment: identity-section;
+}
+
+.identity-section > legend::before {
+  content: counter(identity-section, decimal-leading-zero);
+  margin-right: 9px;
+  color: var(--sage-700);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 確認方法カード：デスクトップは 2 カラム、狭い画面では 1 カラムに積む。 */
+.identity-choice-list {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 640px) {
+  .identity-choice-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+.identity-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 16px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
   cursor: pointer;
   transition: all 0.16s ease;
 }
 
-.identity-choice:hover,
-.terms-row:hover {
+.identity-choice:hover {
   border-color: var(--sage-300);
   background: var(--sage-50);
 }
 
 .identity-choice:has(input:checked) {
-  border-color: var(--sage-500);
+  border-color: var(--sage-600);
+  background: var(--surface);
+  box-shadow: 0 4px 16px oklch(0.4 0.05 145 / 0.12);
+}
+
+/* ネイティブ radio は視覚的に隠し、ラベルクリックでの選択挙動だけ残す。 */
+.identity-choice > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.identity-choice-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.identity-choice-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 10px;
   background: var(--sage-100);
-  box-shadow: inset 0 0 0 1px var(--sage-400);
+  color: var(--sage-700);
 }
 
-.identity-choice input,
-.terms-row input {
-  width: 16px;
-  height: 16px;
-  margin: 3px 0 0;
-  accent-color: var(--sage-700);
-}
-
-.identity-choice span {
-  display: grid;
-  gap: 4px;
+.identity-choice-glyph {
+  width: 19px;
+  height: 19px;
 }
 
 .identity-choice strong {
+  flex: 1;
+  min-width: 0;
   color: var(--sage-900);
-  font-size: 14px;
+  font-size: 16px;
+  font-weight: 700;
 }
 
-.identity-choice small,
-.terms-row span {
+/* カスタム radio インジケーター（右上）。選択時に内側ドットを表示する。 */
+.identity-choice-radio {
+  position: relative;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  transition: border-color 0.16s ease;
+}
+
+.identity-choice:has(input:checked) .identity-choice-radio {
+  border-color: var(--sage-600);
+}
+
+.identity-choice:has(input:checked) .identity-choice-radio::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: var(--sage-600);
+}
+
+/* キーボードフォーカス時はカードにリングを出す（隠した radio の代替）。 */
+.identity-choice:has(input:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.identity-choice small {
   color: var(--ink-muted);
   font-size: 13px;
+  line-height: 1.55;
+}
+
+/* Coming soon の確認方法（KYC）。選択不可の静的カードとして淡く表示する。 */
+.identity-choice--disabled,
+.identity-choice--disabled:hover {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.identity-choice--disabled .identity-choice-icon {
+  background: var(--cream-200);
+  color: var(--ink-faint);
+}
+
+.identity-choice--disabled strong {
+  color: var(--ink-muted);
+}
+
+.identity-choice-soon {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* メンバーシップ検出カード。 */
+.identity-membership-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--sage-200);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.identity-membership-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 11px;
+  background: var(--sage-100);
+  color: var(--sage-700);
+}
+
+.identity-membership-glyph {
+  width: 22px;
+  height: 22px;
+}
+
+.identity-membership-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.identity-membership-headline {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.identity-membership-headline strong {
+  color: var(--sage-900);
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+.identity-membership-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--sage-100);
+  color: var(--sage-700);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.identity-membership-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sage-700);
+  animation: identityPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes identityPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.identity-membership-id {
+  color: var(--sage-800);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.identity-membership-body small {
+  color: var(--ink-muted);
+  font-size: 12.5px;
+}
+
+/* 重複アカウント確認：1 枚の枠に行を積み、行間を罫線で仕切る。 */
+.terms-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.terms-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  margin: 0;
+  padding: 15px 18px;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.terms-row + .terms-row {
+  border-top: 1px solid var(--line);
+}
+
+.terms-row:hover {
+  background: var(--sage-50);
+}
+
+.terms-row:has(input:checked) {
+  background: var(--sage-100);
+}
+
+/* ネイティブ checkbox は視覚的に隠し、カスタムボックスで状態を表示する。 */
+.terms-row > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.terms-row-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 21px;
+  height: 21px;
+  flex: none;
+  margin-top: 1px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--cream-50);
+  transition: all 0.14s ease;
+}
+
+.terms-row:has(input:checked) .terms-row-box {
+  border-color: var(--sage-700);
+  background: var(--sage-700);
+}
+
+.terms-row-check {
+  width: 12px;
+  height: 12px;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+
+.terms-row:has(input:checked) .terms-row-check {
+  opacity: 1;
+}
+
+.terms-row:has(input:focus-visible) .terms-row-box {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.terms-row-label {
+  color: var(--sage-900);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* World ID 証明セクション。 */
+.world-id-verify-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.world-id-verify-button {
+  border-radius: var(--radius-md);
+}
+
+.world-id-glyph {
+  width: 18px;
+  height: 18px;
+}
+
+.world-id-hint,
+.world-id-config-error {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+}
+
+.world-id-config-error {
+  color: oklch(0.42 0.09 25);
+}
+
+.world-id-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.world-id-error-message {
+  margin: 0;
+  color: oklch(0.42 0.09 25);
+  font-size: 13px;
+}
+
+.world-id-verified {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid oklch(0.8 0.05 150);
+  border-radius: var(--radius-md);
+  background: oklch(0.96 0.025 150);
+}
+
+.world-id-verified-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--sage-700);
+  color: var(--cream-50);
+}
+
+.world-id-verified-badge svg {
+  width: 20px;
+  height: 20px;
+}
+
+.world-id-verified-text {
+  display: grid;
+  gap: 2px;
+}
+
+.world-id-verified-label {
+  color: var(--sage-900);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.world-id-nullifier-hint {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+/* 確定操作バー：上罫線で仕切り、戻るを左・主要操作を右へ寄せる。 */
+.wizard-identity-form .wizard-cta-bar {
+  justify-content: flex-start;
+  margin-top: 12px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.wizard-identity-form .wizard-cta-bar .btn-ghost {
+  margin-right: auto;
 }
 
 .identity-fields,
