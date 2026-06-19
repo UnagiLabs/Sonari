@@ -180,7 +180,7 @@ R2 は proof shard の配布 surface です。secret は repo に保存しませ
 運用端末や CI の secret store から次の環境変数を渡します。
 
 ```bash
-export SONARI_R2_BUCKET="sonari-residence-cells"
+export SONARI_R2_BUCKET="sonari-residence-proofs-v1-res7"
 export CLOUDFLARE_ACCOUNT_ID="..."
 export AWS_ACCESS_KEY_ID="..."
 export AWS_SECRET_ACCESS_KEY="..."
@@ -197,6 +197,10 @@ aws s3 sync \
   --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
 ```
 
+Worker の R2 binding `RESIDENCE_PROOF_SHARDS` は bucket
+`sonari-residence-proofs-v1-res7` を指します。proof shard と tile shard は同じ
+bucket の別 prefix に置きます。
+
 Earthquake TEE が使う residence tile manifest / tile shards も public R2 surface に置きます。
 TEE/EC2 runtime には Cloudflare credential を渡さず、public HTTPS URL、object key、manifest SHA-256、allowlist metadata だけを GitHub Actions Variables / CloudFormation Parameters に登録します。
 
@@ -204,31 +208,85 @@ public R2 base URL は Cloudflare dashboard だけでなく、運用端末の `w
 
 ```bash
 wrangler r2 bucket domain get "$SONARI_R2_BUCKET"
-curl -fsS "${SONARI_RESIDENCE_R2_BASE_URL%/}/residence-cells/v1/res7/tiles/tile_manifest.json" \
-  -o .build/residence-cells/r2-tile-manifest.json
 ```
 
-`SONARI_RESIDENCE_TILE_MANIFEST_SHA256` は、ローカル生成物ではなく、R2 にアップロード済みの正確な `tile_manifest.json` bytes から計算します。アップロード前のファイルや pretty-print し直した JSON から計算してはいけません。
+`SONARI_RESIDENCE_TILE_MANIFEST_SHA256` は、ローカル生成物ではなく、R2 exact bytes
+から計算します。R2 exact bytes は `aws s3 cp` または `wrangler r2 object get` で
+bucket から直接取得した bytes です。public URL / CDN / custom domain 経由の
+`curl` 結果は、cache を挟む可能性があるため digest の根拠にしません。
+アップロード前のファイルや pretty-print し直した JSON から計算してはいけません。
 
 ```bash
+aws s3 cp \
+  "s3://${SONARI_R2_BUCKET}/residence-cells/v1/res7/tiles/tile_manifest.json" \
+  .build/residence-cells/r2-tile-manifest.json \
+  --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
 SONARI_RESIDENCE_TILE_MANIFEST_SHA256="$(
   sha256sum .build/residence-cells/r2-tile-manifest.json | awk '{print $1}'
 )"
+
+case "$SONARI_RESIDENCE_TILE_MANIFEST_SHA256" in
+  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+  *) echo "SONARI_RESIDENCE_TILE_MANIFEST_SHA256 must be lowercase 64 hex" >&2; exit 1 ;;
+esac
 ```
 
-GitHub environment `aws-sonari-verifier-runner-dev` / repo Variables に共有する値は次のとおりです。credential material は含めません。
+GitHub Variables に共有する値は次のとおりです。credential material は含めません。
+R2 tile 系は `aws-sonari-verifier-runner-dev` environment Variables に登録します。
+`SONARI_RESIDENCE_ROOT`、`SONARI_RESIDENCE_SOURCE_HASH`、`SONARI_GEO_RESOLUTION` は
+repo-level Variables として readback します。
 
 | variable | source |
 | --- | --- |
-| `SONARI_RESIDENCE_R2_BASE_URL` | `wrangler r2 bucket domain get` または Cloudflare dashboard で確認した public HTTPS base URL |
-| `SONARI_RESIDENCE_TILE_MANIFEST_KEY` | R2 上の `tile_manifest.json` object key |
-| `SONARI_RESIDENCE_TILE_MANIFEST_SHA256` | R2 から取得し直した manifest bytes の lowercase SHA-256 |
-| `SONARI_RESIDENCE_R2_OBJECT_PREFIX` | manifest と tile shard の共通 object prefix |
-| `SONARI_RESIDENCE_R2_BUCKET` | manifest metadata の bucket 名 |
-| `SONARI_RESIDENCE_ALLOWLIST_VERSION` | contract bootstrap と manifest metadata の allowlist version |
-| `SONARI_RESIDENCE_ROOT` | AllowedResidenceCellRegistry の Merkle root |
-| `SONARI_RESIDENCE_SOURCE_HASH` | 任意。Natural Earth source hash / allowlist source hash を evidence に残す場合だけ設定 |
-| `SONARI_GEO_RESOLUTION` | `7` |
+| `SONARI_RESIDENCE_R2_BASE_URL` | environment Variables: `wrangler r2 bucket domain get` または Cloudflare dashboard で確認した public HTTPS base URL |
+| `SONARI_RESIDENCE_TILE_MANIFEST_KEY` | environment Variables: R2 上の `tile_manifest.json` object key |
+| `SONARI_RESIDENCE_TILE_MANIFEST_SHA256` | environment Variables: R2 exact bytes の lowercase 64 hex SHA-256 |
+| `SONARI_RESIDENCE_R2_OBJECT_PREFIX` | environment Variables: manifest と tile shard の共通 object prefix |
+| `SONARI_RESIDENCE_R2_BUCKET` | environment Variables: manifest metadata の bucket 名 |
+| `SONARI_RESIDENCE_ALLOWLIST_VERSION` | environment Variables: contract bootstrap と manifest metadata の allowlist version |
+| `SONARI_RESIDENCE_ROOT` | repo-level Variables: AllowedResidenceCellRegistry の Merkle root |
+| `SONARI_RESIDENCE_SOURCE_HASH` | repo-level Variables: allowlist artifact hash |
+| `SONARI_GEO_RESOLUTION` | repo-level Variables: `7` |
+
+登録と readback は `gh` で行います。
+
+```bash
+gh variable set SONARI_RESIDENCE_R2_BASE_URL \
+  --repo UnagiLabs/Sonari \
+  --env aws-sonari-verifier-runner-dev \
+  --body "$SONARI_RESIDENCE_R2_BASE_URL"
+gh variable set SONARI_RESIDENCE_TILE_MANIFEST_KEY \
+  --repo UnagiLabs/Sonari \
+  --env aws-sonari-verifier-runner-dev \
+  --body "residence-cells/v1/res7/tiles/tile_manifest.json"
+gh variable set SONARI_RESIDENCE_TILE_MANIFEST_SHA256 \
+  --repo UnagiLabs/Sonari \
+  --env aws-sonari-verifier-runner-dev \
+  --body "$SONARI_RESIDENCE_TILE_MANIFEST_SHA256"
+gh variable set SONARI_RESIDENCE_R2_OBJECT_PREFIX \
+  --repo UnagiLabs/Sonari \
+  --env aws-sonari-verifier-runner-dev \
+  --body "residence-cells/v1/res7/tiles"
+gh variable set SONARI_RESIDENCE_R2_BUCKET \
+  --repo UnagiLabs/Sonari \
+  --env aws-sonari-verifier-runner-dev \
+  --body "$SONARI_R2_BUCKET"
+gh variable set SONARI_RESIDENCE_ALLOWLIST_VERSION \
+  --repo UnagiLabs/Sonari \
+  --env aws-sonari-verifier-runner-dev \
+  --body "1"
+
+gh variable list --env aws-sonari-verifier-runner-dev --repo UnagiLabs/Sonari
+gh variable list --repo UnagiLabs/Sonari
+```
 
 ### 7. R2 artifact を検証する
 
@@ -362,9 +420,19 @@ tile のセル欠落・余剰、root 不一致、sha256 改ざんを検出する
 
 proof shard と同じ R2 bucket に、別 prefix で同期します。
 secret は repo に保存せず、運用端末や CI の secret store から渡します。
+Worker は request URL から tile object key を直接組み立てます。
+manifest inventory に無い古い `res4/*.json` が R2 に残ると、本来 water の parent が
+`200` になる可能性があります。そのため upload は prefix parity を守ります。
+prefix parity とは、R2 の `tiles/` prefix 全体が local 生成物と一致し、
+余剰 `res4/*.json` が無い状態です。
 
 ```bash
-aws s3 sync \
+aws s3 sync --dryrun --delete \
+  .build/residence-cells/tiles/v1/res7/ \
+  "s3://${SONARI_R2_BUCKET}/residence-cells/v1/res7/tiles/" \
+  --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+aws s3 sync --delete \
   .build/residence-cells/tiles/v1/res7/ \
   "s3://${SONARI_R2_BUCKET}/residence-cells/v1/res7/tiles/" \
   --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
@@ -374,6 +442,36 @@ tile の object key は `residence-cells/v{allowlist_version}/res{geo_resolution
 です。version 入り path なので、Worker は tile を
 `Cache-Control: public, max-age=31536000, immutable` で配信します。
 Cloudflare の edge cache が吸収するため、同じ Worker でも proof 発行への負荷流入は実質ゼロです。
+
+upload 後は、R2 exact bytes を取得して manifest digest を計算し、R2 prefix を manifest と照合します。
+public URL は配信確認には使いますが、`SONARI_RESIDENCE_TILE_MANIFEST_SHA256` の根拠にはしません。
+
+```bash
+aws s3 cp \
+  "s3://${SONARI_R2_BUCKET}/residence-cells/v1/res7/tiles/tile_manifest.json" \
+  .build/residence-cells/r2-tile-manifest.json \
+  --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+sha256sum .build/residence-cells/r2-tile-manifest.json
+
+aws s3 sync \
+  "s3://${SONARI_R2_BUCKET}/residence-cells/v1/res7/tiles/" \
+  .build/residence-cells/r2-tiles/v1/res7/ \
+  --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+cargo run --release --manifest-path data/residence_cells/Cargo.toml -- verify-tiles \
+  --tile-manifest .build/residence-cells/r2-tiles/v1/res7/tile_manifest.json \
+  --tiles-dir .build/residence-cells/r2-tiles/v1/res7/res4 \
+  --proof-manifest .build/residence-cells/proof-shards/v1/res7/proof_manifest.json
+
+find .build/residence-cells/r2-tiles/v1/res7/res4 -type f -name '*.json' \
+  | sed 's#^.build/residence-cells/r2-tiles/v1/res7/##' \
+  | sort > .build/residence-cells/r2-tile-files.txt
+find .build/residence-cells/tiles/v1/res7/res4 -type f -name '*.json' \
+  | sed 's#^.build/residence-cells/tiles/v1/res7/##' \
+  | sort > .build/residence-cells/local-tile-files.txt
+diff -u .build/residence-cells/local-tile-files.txt .build/residence-cells/r2-tile-files.txt
+```
 
 ## 運用前提
 

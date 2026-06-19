@@ -9,6 +9,7 @@ Operational runbooks and setup guides for running Sonari's contract publish, AWS
 - [./enoki_membership_smoke.md](./enoki_membership_smoke.md) — Enoki / Google zkLogin / gasless MembershipPass testnet smoke and secret rotation runbook
 - [./aws_smoke.md](./aws_smoke.md) — AWS smoke scripts: `pnpm aws:*` verification/smoke commands, invariants, and script boundaries
 - [./residence_cells_pipeline.md](./residence_cells_pipeline.md) — residence-cell generation pipeline: allowlist, Merkle root, proof shards, map tiles, R2/S3 distribution
+- [./residence_tile_artifacts.md](./residence_tile_artifacts.md) — residence tile artifact publication evidence: local verification, R2 readback, GitHub Variables, Worker/UI checks
 
 ---
 
@@ -23,3 +24,4 @@ Sonari の contract publish、AWS verifier runner、smoke test、residence-cell 
 - [./enoki_membership_smoke.md](./enoki_membership_smoke.md) — Enoki / Google zkLogin / gasless MembershipPass の testnet smoke と secret rotation runbook
 - [./aws_smoke.md](./aws_smoke.md) — AWS smoke スクリプト。`pnpm aws:*` の verification / smoke コマンド、invariants、script boundaries
 - [./residence_cells_pipeline.md](./residence_cells_pipeline.md) — residence-cell 生成パイプライン。allowlist、Merkle root、proof shard、map tile、R2/S3 配布
+- [./residence_tile_artifacts.md](./residence_tile_artifacts.md) — residence tile artifact の公開記録。ローカル検証、R2 readback、GitHub Variables、Worker/UI 確認
