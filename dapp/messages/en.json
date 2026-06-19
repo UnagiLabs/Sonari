@@ -156,6 +156,7 @@
                 }
             },
             "identity": {
+                "eyebrow": "Identity",
                 "title": "Verify it's you. Now or later.",
                 "lead": "Registration only needs a residence cell and Membership SBT. Come back before payout to complete identity verification.",
                 "routeLegend": "Verification route",
@@ -177,6 +178,7 @@
                     "checkingBody": "Looking up the pass owned by your connected wallet.",
                     "detectedTitle": "Membership SBT detected",
                     "detectedBody": "Verification binds to this pass and your connected wallet.",
+                    "bound": "Bound",
                     "none": "No Membership SBT found for this wallet. Issue it in the previous step first.",
                     "multiple": "Multiple Membership SBTs found for this wallet. Please contact support before verifying.",
                     "errorFallback": "Could not look up your Membership SBT."

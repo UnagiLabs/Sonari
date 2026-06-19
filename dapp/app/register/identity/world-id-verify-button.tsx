@@ -71,6 +71,41 @@ export interface WorldIdVerifyButtonProps {
 type VerifyStatus = "idle" | "preparing" | "open" | "verified" | "error";
 
 // ---------------------------------------------------------------------------
+// Presentational icons (visual only)
+// ---------------------------------------------------------------------------
+
+// World ID を表すグローブアイコン。検証ボタンのラベル前に置く装飾。
+function GlobeIcon() {
+    return (
+        <svg aria-hidden="true" className="world-id-glyph" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" strokeWidth="1.8" />
+            <path
+                d="M3 12h18M12 3c2.6 2.4 2.6 15.6 0 18M12 3c-2.6 2.4-2.6 15.6 0 18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+            />
+        </svg>
+    );
+}
+
+// 検証済みカードの円形チェックバッジ。
+function VerifiedBadgeIcon() {
+    return (
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path
+                d="M20 6 9 17l-5-5"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="3"
+            />
+        </svg>
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -183,10 +218,15 @@ export function WorldIdVerifyButton({
         const fingerprint = nullifier.length > 0 ? shortNullifierFingerprint(nullifier) : null;
         return (
             <div className="world-id-verified" role="status">
-                <span className="world-id-verified-label">{t("verifiedLabel")}</span>
-                {fingerprint !== null ? (
-                    <span className="world-id-nullifier-hint">{fingerprint}</span>
-                ) : null}
+                <span className="world-id-verified-badge" aria-hidden="true">
+                    <VerifiedBadgeIcon />
+                </span>
+                <span className="world-id-verified-text">
+                    <span className="world-id-verified-label">{t("verifiedLabel")}</span>
+                    {fingerprint !== null ? (
+                        <span className="world-id-nullifier-hint">{fingerprint}</span>
+                    ) : null}
+                </span>
             </div>
         );
     }
@@ -200,7 +240,7 @@ export function WorldIdVerifyButton({
             ) : null}
 
             <button
-                className="btn btn-primary"
+                className="btn btn-primary world-id-verify-button"
                 disabled={
                     !isConfigured ||
                     !isBindingReady ||
@@ -210,6 +250,7 @@ export function WorldIdVerifyButton({
                 onClick={handleOpenClick}
                 type="button"
             >
+                <GlobeIcon />
                 {status === "preparing" ? t("preparing") : t("verifyButton")}
             </button>
 
