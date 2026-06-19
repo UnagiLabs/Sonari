@@ -293,7 +293,7 @@ describe("AWS runner workflow helper", () => {
         );
 
         expect(template).toContain('echo "SONARI_WALRUS_N_SHARDS=1000"');
-        expect(template).toContain("walrus_n_shards:\\$walrus_n_shards");
+        expect(template).toContain("n:(.SONARI_WALRUS_N_SHARDS|tonumber)");
         expect(template).toContain("cat >/opt/sonari/bin/run-http-enclave");
         expect(template).toContain('socat -t "$T" - "VSOCK-CONNECT:$C:7777"');
         expect(template).toContain('socat -t "${!T:-180}" - "VSOCK-CONNECT:$C:3000"');
@@ -1165,6 +1165,11 @@ describe("AWS runner workflow helper", () => {
             result_s3_key: "results/us7000sonari/cmd-123.json",
             relayer_success: {
                 mode: "submit",
+                target: earthquakeRelayerTarget,
+                registry: earthquakeRelayerRegistry,
+                verifierRegistry: earthquakeRelayerVerifierRegistry,
+                categoryRegistry: earthquakeRelayerCategoryRegistry,
+                categoryPool: earthquakeRelayerCategoryPool,
                 digest: "tx-digest",
                 objectId: "0xdisaster",
             },
