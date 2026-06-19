@@ -81,7 +81,13 @@ export function EmergencyBanner({
                 </div>
                 <h2 className="donate-emergency-banner-title">{t("title")}</h2>
                 <p className="donate-emergency-banner-body">{t("body", { name: view.label })}</p>
-                <div className="donate-emergency-banner-actions">
+                <div
+                    className={
+                        primaryAction !== undefined
+                            ? "donate-emergency-banner-actions donate-emergency-banner-actions--with-primary"
+                            : "donate-emergency-banner-actions"
+                    }
+                >
                     {primaryAction !== undefined ? (
                         <a
                             className="donate-emergency-banner-cta donate-emergency-banner-cta-primary btn"
