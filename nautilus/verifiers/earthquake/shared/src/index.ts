@@ -94,6 +94,7 @@ export const ERROR_CODES = [
     "SHAKEMAP_PARSE_FAILED",
     "MMI_NOT_AVAILABLE",
     "NO_AFFECTED_CELLS",
+    "SEA_ONLY_AFFECTED_CELLS",
     "SOURCE_STALE",
     "SOURCE_REVISION_OLD",
     "UNSUPPORTED_HAZARD_TYPE",
@@ -233,6 +234,13 @@ export interface EvidenceManifest {
         hash: string;
         root: string;
         count: number;
+        total_cell_count: number;
+        land_cell_count: number;
+        water_cell_count: number;
+        land_allowlist_version: number;
+        land_allowlist_root: string;
+        land_allowlist_source_hash?: string;
+        land_classifier: string;
         geo_resolution: number;
     };
 }
@@ -494,6 +502,17 @@ function hasValidEvidenceAffectedCells(value: unknown): boolean {
         isHash32(value.hash) &&
         isHash32(value.root) &&
         isSafeIntegerInRange(value.count, 1, ONE_MILLION) &&
+        isSafeIntegerInRange(value.total_cell_count, 1, ONE_MILLION) &&
+        isSafeIntegerInRange(value.land_cell_count, 1, ONE_MILLION) &&
+        isSafeNonNegativeInteger(value.water_cell_count) &&
+        value.land_cell_count === value.count &&
+        value.land_cell_count + value.water_cell_count === value.total_cell_count &&
+        value.land_cell_count <= value.total_cell_count &&
+        isSafeIntegerInRange(value.land_allowlist_version, 0, Number.MAX_SAFE_INTEGER) &&
+        isHash32(value.land_allowlist_root) &&
+        (value.land_allowlist_source_hash === undefined ||
+            isHash32(value.land_allowlist_source_hash)) &&
+        isUtf8BytesInRange(value.land_classifier, 1, 128) &&
         value.geo_resolution === DEFAULT_ORACLE_CONTRACT.geo_resolution
     );
 }

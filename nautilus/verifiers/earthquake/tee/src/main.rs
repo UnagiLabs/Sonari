@@ -19,9 +19,9 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use tee::server::{EGRESS_PROXY_URL_KEY, EarthquakeProcessHandler};
 use tee::{
-    DEFAULT_WALRUS_CLI_TIMEOUT_MS, OracleOutput, UsgsOracleInput, WalrusCliSourceArchive,
-    WalrusCliSourceArchiveConfig, canonical_json_bytes, grid_xml_from_artifact,
-    parse_command_timeout_ms, parse_n_shards, process_usgs_with_signer,
+    DEFAULT_WALRUS_CLI_TIMEOUT_MS, OracleOutput, ResidenceTileConfig, UsgsOracleInput,
+    WalrusCliSourceArchive, WalrusCliSourceArchiveConfig, canonical_json_bytes,
+    grid_xml_from_artifact, parse_command_timeout_ms, parse_n_shards, process_usgs_with_signer,
     process_usgs_with_source_archive,
 };
 
@@ -168,6 +168,7 @@ struct EnclaveState {
     signing_key_seed: [u8; 32],
     ctx: TeeContext,
     archive_config: Option<WalrusCliSourceArchiveConfig>,
+    residence_tile_config: Option<ResidenceTileConfig>,
 }
 
 fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -181,6 +182,7 @@ fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error
         signing_key_seed,
         ctx: tee_context_from_env(),
         archive_config: WalrusCliSourceArchiveConfig::from_env().ok(),
+        residence_tile_config: ResidenceTileConfig::from_env().ok(),
     };
     let listener = VsockListener::bind(args.port)?;
     eprintln!(
@@ -219,9 +221,15 @@ fn tee_context_from_env() -> TeeContext {
 /// shard count is absent on a non-finalized path) the handler is built without
 /// it and fails closed only when a finalized result actually needs to archive.
 fn earthquake_handler_from_env() -> EarthquakeProcessHandler {
-    match WalrusCliSourceArchiveConfig::from_env() {
-        Ok(config) => EarthquakeProcessHandler::with_archive_config(config),
-        Err(_) => EarthquakeProcessHandler::new(),
+    match (
+        WalrusCliSourceArchiveConfig::from_env(),
+        ResidenceTileConfig::from_env(),
+    ) {
+        (Ok(archive_config), Ok(residence_tile_config)) => {
+            EarthquakeProcessHandler::with_runtime_configs(archive_config, residence_tile_config)
+        }
+        (Ok(config), Err(_)) => EarthquakeProcessHandler::with_archive_config(config),
+        _ => EarthquakeProcessHandler::new(),
     }
 }
 
@@ -242,9 +250,18 @@ fn route_request(
         }
         ("POST", "/process_data") => {
             let envelope = parse_process_data_envelope(&request.body)?;
-            let handler = match state.archive_config.clone() {
-                Some(config) => EarthquakeProcessHandler::with_archive_config(config),
-                None => EarthquakeProcessHandler::new(),
+            let handler = match (
+                state.archive_config.clone(),
+                state.residence_tile_config.clone(),
+            ) {
+                (Some(archive_config), Some(residence_tile_config)) => {
+                    EarthquakeProcessHandler::with_runtime_configs(
+                        archive_config,
+                        residence_tile_config,
+                    )
+                }
+                (Some(config), None) => EarthquakeProcessHandler::with_archive_config(config),
+                _ => EarthquakeProcessHandler::new(),
             };
             let output = handler
                 .process(&serde_json::to_vec(&envelope.payload)?, &state.ctx)
@@ -398,14 +415,65 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
         "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
         &config.egress_proxy_url,
     );
+    set_env_before_server(
+        "SONARI_RESIDENCE_R2_BASE_URL",
+        &config.residence_r2_base_url,
+    );
+    set_env_before_server(
+        "SONARI_RESIDENCE_TILE_MANIFEST_KEY",
+        &config.residence_tile_manifest_key,
+    );
+    set_env_before_server(
+        "SONARI_RESIDENCE_TILE_MANIFEST_SHA256",
+        &config.residence_tile_manifest_sha256,
+    );
+    set_env_before_server(
+        "SONARI_RESIDENCE_R2_OBJECT_PREFIX",
+        &config.residence_r2_object_prefix,
+    );
+    set_env_before_server("SONARI_RESIDENCE_R2_BUCKET", &config.residence_r2_bucket);
+    set_env_before_server(
+        "SONARI_RESIDENCE_ALLOWLIST_VERSION",
+        &config.residence_allowlist_version,
+    );
+    set_env_before_server("SONARI_GEO_RESOLUTION", &config.geo_resolution);
+    set_env_before_server("SONARI_RESIDENCE_ROOT", &config.residence_root);
+    if let Some(source_hash) = config
+        .residence_source_hash
+        .as_ref()
+        .filter(|value| !value.is_empty())
+    {
+        set_env_before_server("SONARI_RESIDENCE_SOURCE_HASH", source_hash);
+    }
     Ok(())
 }
 
 #[derive(Debug, Deserialize)]
 struct BootstrapConfig {
+    #[serde(rename = "w", alias = "walrus_cli")]
     walrus_cli: String,
+    #[serde(rename = "n", alias = "walrus_n_shards")]
     walrus_n_shards: u32,
+    #[serde(rename = "p", alias = "egress_proxy_url")]
     egress_proxy_url: String,
+    #[serde(rename = "b", alias = "SONARI_RESIDENCE_R2_BASE_URL")]
+    residence_r2_base_url: String,
+    #[serde(rename = "m", alias = "SONARI_RESIDENCE_TILE_MANIFEST_KEY")]
+    residence_tile_manifest_key: String,
+    #[serde(rename = "s", alias = "SONARI_RESIDENCE_TILE_MANIFEST_SHA256")]
+    residence_tile_manifest_sha256: String,
+    #[serde(rename = "o", alias = "SONARI_RESIDENCE_R2_OBJECT_PREFIX")]
+    residence_r2_object_prefix: String,
+    #[serde(rename = "k", alias = "SONARI_RESIDENCE_R2_BUCKET")]
+    residence_r2_bucket: String,
+    #[serde(rename = "v", alias = "SONARI_RESIDENCE_ALLOWLIST_VERSION")]
+    residence_allowlist_version: String,
+    #[serde(rename = "g", alias = "SONARI_GEO_RESOLUTION")]
+    geo_resolution: String,
+    #[serde(rename = "r", alias = "SONARI_RESIDENCE_ROOT")]
+    residence_root: String,
+    #[serde(rename = "h", alias = "SONARI_RESIDENCE_SOURCE_HASH")]
+    residence_source_hash: Option<String>,
 }
 
 fn set_env_before_server(name: &str, value: &str) {
@@ -758,6 +826,13 @@ mod tests {
                 hash: format!("0x{}", "66".repeat(32)),
                 root: format!("0x{}", "44".repeat(32)),
                 count: 1,
+                total_cell_count: 1,
+                land_cell_count: 1,
+                water_cell_count: 0,
+                land_allowlist_version: 0,
+                land_allowlist_root: format!("0x{}", "00".repeat(32)),
+                land_allowlist_source_hash: None,
+                land_classifier: "all_affected_cells_land_compat_v1".to_owned(),
                 geo_resolution: 7,
             },
         }

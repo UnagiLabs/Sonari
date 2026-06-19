@@ -79,6 +79,13 @@ EVIDENCE_AFFECTED_ORDER = [
     "hash",
     "root",
     "count",
+    "total_cell_count",
+    "land_cell_count",
+    "water_cell_count",
+    "land_allowlist_version",
+    "land_allowlist_root",
+    "land_allowlist_source_hash",
+    "land_classifier",
     "geo_resolution",
 ]
 
@@ -147,6 +154,8 @@ def hex_bytes(value: str) -> bytes:
 def ordered(value: Any, order: list[str], item_order: list[str] | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key in order:
+        if key not in value:
+            continue
         item = value[key]
         if isinstance(item, list) and item_order is not None:
             out[key] = [ordered(child, item_order) for child in item]
@@ -463,7 +472,13 @@ def compute() -> dict[str, Any]:
         "uri": "ipfs://sonari/examples/us7000sonari/affected_cells.json",
         "hash": affected_cells_data_hash,
         "root": root,
-        "count": len(cells),
+        "count": payload["affected_cell_count"],
+        "total_cell_count": len(cells),
+        "land_cell_count": payload["affected_cell_count"],
+        "water_cell_count": len(cells) - payload["affected_cell_count"],
+        "land_allowlist_version": 0,
+        "land_allowlist_root": "0x" + "00" * 32,
+        "land_classifier": "all_affected_cells_land_compat_v1",
         "geo_resolution": affected["geo_resolution"],
     }
     if evidence.get("affected_cells") != expected_affected:
@@ -487,7 +502,7 @@ def compute() -> dict[str, Any]:
     ]:
         if payload[key] != value:
             raise ValueError(f"payload {key} mismatch: expected {value}, found {payload[key]}")
-    if payload["affected_cell_count"] != len(cells):
+    if payload["affected_cell_count"] < 1 or payload["affected_cell_count"] > len(cells):
         raise ValueError("payload affected_cell_count mismatch")
 
     return {

@@ -120,6 +120,41 @@ Parameters:
   EarthquakeTeeEifSha256:
     Type: String
     Description: SHA-256 hex digest for the earthquake Nitro Enclave EIF.
+  ResidenceR2BaseUrl:
+    Type: String
+    AllowedPattern: "^https://[^\\s']+$"
+    Description: Public HTTPS base URL for residence tile manifest and tile objects in Cloudflare R2.
+  ResidenceTileManifestKey:
+    Type: String
+    AllowedPattern: "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"
+    Description: R2 object key for the residence tile_manifest.json.
+  ResidenceTileManifestSha256:
+    Type: String
+    AllowedPattern: "^[0-9a-fA-F]{64}$"
+    Description: SHA-256 hex digest computed from the exact tile_manifest.json bytes uploaded to R2.
+  ResidenceR2ObjectPrefix:
+    Type: String
+    AllowedPattern: "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"
+    Description: R2 object prefix containing the residence manifest and tile objects.
+  ResidenceR2Bucket:
+    Type: String
+    AllowedPattern: "^[A-Za-z0-9][A-Za-z0-9._-]{1,61}[A-Za-z0-9]$"
+    Description: R2 bucket name recorded in the residence tile manifest metadata.
+  ResidenceAllowlistVersion:
+    Type: Number
+    Description: AllowedResidenceCellRegistry version expected by the residence tile manifest.
+  ResidenceRoot:
+    Type: String
+    AllowedPattern: "^0x[0-9a-fA-F]{64}$"
+    Description: AllowedResidenceCellRegistry Merkle root expected by the residence tile manifest.
+  ResidenceSourceHash:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^0x[0-9a-fA-F]{64}$"
+    Description: Optional source hash for the residence allowlist.
+  GeoResolution:
+    Type: Number
+    Description: H3 resolution expected by earthquake affected cells and residence tiles.
   MembershipTeeArtifactS3Bucket:
     Type: String
     Description: S3 bucket containing the membership identity TEE artifact tar.gz.
@@ -586,30 +621,23 @@ Resources:
             #!/bin/bash
             set -euo pipefail
             : "${!E:?}" "${!A:?}" "${!C:?}" "${!M:?}" "${!X:?}" "${!B:?}"
-            i="$(mktemp)"
-            o="$(mktemp)"
-            trap 'rm -f "$i" "$o"' EXIT
-            cat >"$i"
+            i=$(mktemp);o=$(mktemp);trap 'rm -f "$i" "$o"' EXIT;cat >"$i"
             if [ ! -f "$M" ]; then
-              test -s "$E"
-              nitro-cli terminate-enclave --all &>/dev/null || true
-              rm -f $X
+              test -s "$E";nitro-cli terminate-enclave --all &>/dev/null || true;rm -f $X
               nitro-cli run-enclave $A >/dev/null 2>/tmp/sonari-enclave.err || { cat /tmp/sonari-enclave.err >&2; exit 1; }
-              sleep 2
-              eval "$B"
-              touch "$M"
+              sleep 2;eval "$B";touch "$M"
             fi
-            action="$(jq -r '.action // empty' "$i")"
-            case "$action" in
-              health_check) method=GET; path=/health_check ;;
-              get_attestation) method=GET; path=/get_attestation ;;
-              process_data) method=POST; path=/process_data ;;
-              *) echo "Unsupported TEE action: $action" >&2; exit 1 ;;
+            a=$(jq -r '.action // empty' "$i")
+            case "$a" in
+              health_check) m=GET;p=/health_check ;;
+              get_attestation) m=GET;p=/get_attestation ;;
+              process_data) m=POST;p=/process_data ;;
+              *) echo "Unsupported TEE action: $a" >&2; exit 1 ;;
             esac
-            if [ "$method" = POST ]; then
-              { printf 'POST %s HTTP/1.0\r\nContent-Length:%s\r\n\r\n' "$path" "$(wc -c <"$i")"; cat "$i"; }
+            if [ "$m" = POST ]; then
+              { printf 'POST %s HTTP/1.0\r\nContent-Length:%s\r\n\r\n' "$p" "$(wc -c <"$i")"; cat "$i"; }
             else
-              printf 'GET %s HTTP/1.0\r\n\r\n' "$path"
+              printf 'GET %s HTTP/1.0\r\n\r\n' "$p"
             fi | socat -t "${!T:-180}" - "VSOCK-CONNECT:$C:3000" >"$o"
             head -n 1 "$o" | tr -d '\r' | grep -Eq '^HTTP/1\.[01] 200 ' || { cat "$o" >&2; exit 1; }
             sed '1,/^\r\{0,1\}$/d' "$o"
@@ -619,7 +647,7 @@ Resources:
             #!/bin/bash
             set -euo pipefail
             set -a;. /opt/sonari/runner.env;set +a
-            E="$SONARI_EARTHQUAKE_EIF_PATH" A="$SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_EARTHQUAKE_ENCLAVE_CID" M=/tmp/se X="/tmp/sm /tmp/sc" T=180 B='jq -n --arg walrus_cli "$SONARI_WALRUS_CLI" --argjson walrus_n_shards "$SONARI_WALRUS_N_SHARDS" --arg egress_proxy_url "$SONARI_EARTHQUAKE_EGRESS_PROXY_URL" "{walrus_cli:\$walrus_cli,walrus_n_shards:\$walrus_n_shards,egress_proxy_url:\$egress_proxy_url}" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
+            E="$SONARI_EARTHQUAKE_EIF_PATH" A="$SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_EARTHQUAKE_ENCLAVE_CID" M=/tmp/se X="/tmp/sm /tmp/sc" T=180 B='jq -n '\''env|{w:.SONARI_WALRUS_CLI,n:(.SONARI_WALRUS_N_SHARDS|tonumber),p:.SONARI_EARTHQUAKE_EGRESS_PROXY_URL,b:.SONARI_RESIDENCE_R2_BASE_URL,m:.SONARI_RESIDENCE_TILE_MANIFEST_KEY,s:.SONARI_RESIDENCE_TILE_MANIFEST_SHA256,o:.SONARI_RESIDENCE_R2_OBJECT_PREFIX,k:.SONARI_RESIDENCE_R2_BUCKET,v:.SONARI_RESIDENCE_ALLOWLIST_VERSION,g:.SONARI_GEO_RESOLUTION,r:.SONARI_RESIDENCE_ROOT,h:.SONARI_RESIDENCE_SOURCE_HASH}'\'' | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
             SONARI_EARTHQUAKE_ENCLAVE_WRAPPER
             chmod 0500 /opt/sonari/bin/run-earthquake-enclave
             cat >/opt/sonari/bin/run-membership-identity-enclave <<'SONARI_ENCLAVE_WRAPPER'
@@ -647,15 +675,9 @@ Resources:
               set +a
             fi
             case "${!SONARI_VERIFIER_KIND:-earthquake}" in
-              "census")
-                exec "${!SONARI_CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-census-enclave}"
-                ;;
-              "membership_identity")
-                exec "${!SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-membership-identity-enclave}"
-                ;;
-              *)
-                exec "${!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"
-                ;;
+              "census") exec "${!SONARI_CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-census-enclave}" ;;
+              "membership_identity") exec "${!SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-membership-identity-enclave}" ;;
+              *) exec "${!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}" ;;
             esac
             SONARI_VERIFIER_DISPATCH
             chmod 0500 /opt/sonari/bin/run-sonari-verifier
@@ -679,111 +701,88 @@ Resources:
             ${WorldIdAppId}
             SONARI_WORLD_ID_APP_ID
             )
-            world_id_action=$(cat <<'SONARI_WORLD_ID_ACTION'
-            ${WorldIdAction}
-            SONARI_WORLD_ID_ACTION
-            )
+            world_id_action='${WorldIdAction}'
             world_id_api_base="https://developer.world.org"
             world_id_api_host="$(printf '%s' "$world_id_api_base" | sed -E 's#^https?://([^/:]+).*#\1#')"
             if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
-              echo "WorldIdApiBase must be http(s)" >&2
+              echo "bad WorldIdApiBase" >&2
+              exit 1
+            fi
+            residence_r2_base_url='${ResidenceR2BaseUrl}'
+            residence_r2_host="$(printf '%s' "$residence_r2_base_url" | sed -E 's#^https://([^/:]+).*#\1#')"
+            if [ -z "$residence_r2_host" ] || [ "$residence_r2_host" = "$residence_r2_base_url" ]; then
+              echo "bad ResidenceR2BaseUrl" >&2
               exit 1
             fi
             vsock_proxy_path="$(command -v vsock-proxy || true)"
             if [ -z "$vsock_proxy_path" ]; then
-              echo "vsock-proxy is required for earthquake enclave egress" >&2
+              echo "vsock-proxy missing" >&2
               exit 1
             fi
             cat >/opt/sonari/bin/sonari-earthquake-egress-connect-proxy <<'SONARI_EARTHQUAKE_CONNECT_PROXY'
             #!/usr/bin/env python3
-            import argparse
-            import select
-            import socket
-            import socketserver
-
-            class ConnectProxy(socketserver.ThreadingMixIn, socketserver.TCPServer):
-                allow_reuse_address = True
-                daemon_threads = True
-
-            class Handler(socketserver.BaseRequestHandler):
-                def handle(self):
-                    data = b""
-                    while b"\r\n\r\n" not in data and len(data) <= 8192:
-                        chunk = self.request.recv(4096)
-                        if not chunk:
-                            return
-                        data += chunk
-                    line = data.split(b"\r\n", 1)[0].decode("ascii", "replace")
-                    parts = line.split()
-                    if len(parts) != 3 or parts[0].upper() != "CONNECT":
-                        self.request.sendall(b"HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n")
-                        return
-                    target = parts[1].lower()
-                    if target not in self.server.allowlist:
-                        self.request.sendall(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
-                        return
-                    host, port = target.rsplit(":", 1)
-                    upstream = socket.create_connection((host, int(port)), timeout=10)
-                    self.request.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-                    sockets = [self.request, upstream]
-                    try:
-                        while sockets:
-                            readable, _, _ = select.select(sockets, [], [], 60)
-                            if not readable:
-                                break
-                            for source in readable:
-                                chunk = source.recv(65536)
-                                if not chunk:
-                                    sockets.remove(source)
-                                    continue
-                                destination = upstream if source is self.request else self.request
-                                destination.sendall(chunk)
-                    finally:
-                        upstream.close()
-
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--listen-host", default="127.0.0.1")
-            parser.add_argument("--listen-port", type=int, required=True)
-            parser.add_argument("--allowlist-file", required=True)
-            args = parser.parse_args()
-            with open(args.allowlist_file, encoding="utf-8") as file:
-                allowlist = frozenset(line.strip().lower() for line in file if line.strip())
-            with ConnectProxy((args.listen_host, args.listen_port), Handler) as server:
-                server.allowlist = allowlist
-                server.serve_forever()
+            import select,socket,socketserver,sys
+            class S(socketserver.ThreadingTCPServer):
+              allow_reuse_address=True;daemon_threads=True
+            class H(socketserver.BaseRequestHandler):
+              def handle(self):
+                d=b""
+                while b"\r\n\r\n" not in d and len(d)<=8192:
+                  c=self.request.recv(4096)
+                  if not c:return
+                  d+=c
+                p=d.split(b"\r\n",1)[0].decode("ascii","replace").split()
+                if len(p)!=3 or p[0].upper()!="CONNECT":
+                  self.request.sendall(b"HTTP/1.1 405\r\n\r\n");return
+                t=p[1].lower()
+                if t not in self.server.allowlist:
+                  self.request.sendall(b"HTTP/1.1 403\r\n\r\n");return
+                h,p=t.rsplit(":",1);u=socket.create_connection((h,int(p)),timeout=10)
+                try:
+                  self.request.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n");ss=[self.request,u]
+                  while ss:
+                    r,_,_=select.select(ss,[],[],60)
+                    if not r:break
+                    for s in r:
+                      c=s.recv(65536)
+                      if not c:
+                        ss.remove(s);continue
+                      (u if s is self.request else self.request).sendall(c)
+                finally:
+                  u.close()
+            v=sys.argv;host="127.0.0.1";port=int(v[v.index("--listen-port")+1]);path=v[v.index("--allowlist-file")+1]
+            if "--listen-host" in v:host=v[v.index("--listen-host")+1]
+            with open(path,encoding="utf-8") as f:
+              allowlist=frozenset(l.strip().lower() for l in f if l.strip())
+            with S((host,port),H) as s:
+              s.allowlist=allowlist;s.serve_forever()
             SONARI_EARTHQUAKE_CONNECT_PROXY
             chmod 0500 /opt/sonari/bin/sonari-earthquake-egress-connect-proxy
-            printf '%s\n' "earthquake.usgs.gov:443" "$world_id_api_host:443" "graphql.mainnet.sui.io:443" "graphql.testnet.sui.io:443" "graphql.devnet.sui.io:443" >/opt/sonari/earthquake-egress-allowlist
+            printf '%s\n' "earthquake.usgs.gov:443" "$residence_r2_host:443" "$world_id_api_host:443" "graphql.mainnet.sui.io:443" "graphql.testnet.sui.io:443" "graphql.devnet.sui.io:443" >/opt/sonari/earthquake-egress-allowlist
             if ! grep -Fq '{address: 127.0.0.1, port: 18081}' /etc/nitro_enclaves/vsock-proxy.yaml; then
               printf '%s\n' '- {address: 127.0.0.1, port: 18081}' >>/etc/nitro_enclaves/vsock-proxy.yaml
             fi
             cat >/etc/systemd/system/sonari-earthquake-egress-connect-proxy.service <<'SONARI_EARTHQUAKE_CONNECT_PROXY_SERVICE'
             [Unit]
-            Description=Sonari earthquake HTTPS CONNECT egress proxy
             After=network-online.target
             Wants=network-online.target
-
             [Service]
             Type=simple
             Restart=always
             RestartSec=2
             ExecStart=/opt/sonari/bin/sonari-earthquake-egress-connect-proxy --listen-port 18081 --allowlist-file /opt/sonari/earthquake-egress-allowlist
-
             [Install]
             WantedBy=multi-user.target
             SONARI_EARTHQUAKE_CONNECT_PROXY_SERVICE
             cat >/etc/systemd/system/sonari-earthquake-egress-vsock-proxy.service <<SONARI_EARTHQUAKE_VSOCK_PROXY_SERVICE
             [Unit]
-            Description=Sonari earthquake egress vsock proxy
             After=sonari-earthquake-egress-connect-proxy.service nitro-enclaves-allocator.service
             Wants=sonari-earthquake-egress-connect-proxy.service nitro-enclaves-allocator.service
-
             [Service]
             Type=simple
             Restart=always
             RestartSec=2
             ExecStart=$vsock_proxy_path 18080 127.0.0.1 18081
-
             [Install]
             WantedBy=multi-user.target
             SONARI_EARTHQUAKE_VSOCK_PROXY_SERVICE
@@ -794,8 +793,16 @@ Resources:
               echo "RUNNER_TOKEN_FILE=/opt/sonari/runner-token"
               echo "SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus"
               echo "SONARI_WALRUS_N_SHARDS=1000"
-              echo "SONARI_EARTHQUAKE_EGRESS_PROXY_PORT=18080"
               echo "SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080"
+              printf 'SONARI_RESIDENCE_R2_BASE_URL=%q\n' "$residence_r2_base_url"
+              printf 'SONARI_RESIDENCE_TILE_MANIFEST_KEY=%q\n' '${ResidenceTileManifestKey}'
+              echo "SONARI_RESIDENCE_TILE_MANIFEST_SHA256=${ResidenceTileManifestSha256}"
+              printf 'SONARI_RESIDENCE_R2_OBJECT_PREFIX=%q\n' '${ResidenceR2ObjectPrefix}'
+              echo "SONARI_RESIDENCE_R2_BUCKET=${ResidenceR2Bucket}"
+              echo "SONARI_RESIDENCE_ALLOWLIST_VERSION=${ResidenceAllowlistVersion}"
+              echo "SONARI_GEO_RESOLUTION=${GeoResolution}"
+              echo "SONARI_RESIDENCE_ROOT=${ResidenceRoot}"
+              echo "SONARI_RESIDENCE_SOURCE_HASH=${ResidenceSourceHash}"
               echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"
               echo "SONARI_SIGNING_MATERIAL_KMS_KEY_ID=${SigningMaterialKmsKey}"
               printf 'SONARI_EARTHQUAKE_EIF_PATH=%q\n' "$earthquake_eif"

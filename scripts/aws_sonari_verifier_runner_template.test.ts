@@ -396,14 +396,37 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("set -a;. /opt/sonari/runner.env;set +a");
         expect(template).toContain("VSOCK-CONNECT:$C:7777");
         expect(template).toContain("VSOCK-CONNECT:$C:3000");
-        expect(template).toContain("health_check) method=GET; path=/health_check");
-        expect(template).toContain("get_attestation) method=GET; path=/get_attestation");
-        expect(template).toContain("process_data) method=POST; path=/process_data");
+        expect(template).toContain("health_check) m=GET;p=/health_check");
+        expect(template).toContain("get_attestation) m=GET;p=/get_attestation");
+        expect(template).toContain("process_data) m=POST;p=/process_data");
         expect(template).toContain("SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus");
         expect(template).toContain("SONARI_EARTHQUAKE_EIF_PATH");
         expect(template).toContain("SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS");
         expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_URL");
-        expect(template).toContain("egress_proxy_url:\\$egress_proxy_url");
+        expect(template).toContain("env|{w:.SONARI_WALRUS_CLI");
+        expect(template).toContain("p:.SONARI_EARTHQUAKE_EGRESS_PROXY_URL");
+        expect(template).toContain("ResidenceR2BaseUrl:");
+        expect(template).toContain("ResidenceTileManifestSha256:");
+        expect(template).toContain("ResidenceRoot:");
+        expect(template).toContain("GeoResolution:");
+        expect(template).toContain(
+            'ResidenceTileManifestKey:\n    Type: String\n    AllowedPattern: "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"',
+        );
+        expect(template).toContain(
+            'ResidenceR2ObjectPrefix:\n    Type: String\n    AllowedPattern: "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"',
+        );
+        expect(template).toContain(
+            'ResidenceR2Bucket:\n    Type: String\n    AllowedPattern: "^[A-Za-z0-9][A-Za-z0-9._-]{1,61}[A-Za-z0-9]$"',
+        );
+        expect(template).toContain("SONARI_RESIDENCE_R2_BASE_URL");
+        expect(template).toContain("SONARI_RESIDENCE_TILE_MANIFEST_KEY");
+        expect(template).toContain("SONARI_RESIDENCE_TILE_MANIFEST_SHA256");
+        expect(template).toContain("SONARI_RESIDENCE_R2_OBJECT_PREFIX");
+        expect(template).toContain("SONARI_RESIDENCE_R2_BUCKET");
+        expect(template).toContain("SONARI_RESIDENCE_ALLOWLIST_VERSION");
+        expect(template).toContain("SONARI_GEO_RESOLUTION");
+        expect(template).toContain("SONARI_RESIDENCE_ROOT");
+        expect(template).toContain("SONARI_RESIDENCE_SOURCE_HASH");
         expect(template).toContain(
             'exec "$' +
                 '{!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"',
@@ -493,9 +516,25 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("sonari-earthquake-egress-connect-proxy.service");
         expect(template).toContain("sonari-earthquake-egress-vsock-proxy.service");
         expect(template).toContain("earthquake.usgs.gov:443");
+        expect(template).toContain("$residence_r2_host:443");
+        expect(template).toContain("residence_r2_base_url='$" + "{ResidenceR2BaseUrl}'");
+        expect(template).toContain('echo "bad ResidenceR2BaseUrl"');
         expect(template).toContain("{address: 127.0.0.1, port: 18081}");
-        expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_PORT=18080");
         expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080");
+        expect(template).toContain(
+            "printf 'SONARI_RESIDENCE_TILE_MANIFEST_KEY=%q\\n' '$" + "{ResidenceTileManifestKey}'",
+        );
+        expect(template).toContain(
+            "printf 'SONARI_RESIDENCE_R2_OBJECT_PREFIX=%q\\n' '$" + "{ResidenceR2ObjectPrefix}'",
+        );
+        expect(template).not.toContain(
+            'echo "SONARI_RESIDENCE_TILE_MANIFEST_KEY=$' + '{ResidenceTileManifestKey}"',
+        );
+        expect(template).not.toContain(
+            'echo "SONARI_RESIDENCE_R2_OBJECT_PREFIX=$' + '{ResidenceR2ObjectPrefix}"',
+        );
+        expect(template).not.toContain("CLOUDFLARE_API_TOKEN");
+        expect(template).not.toContain("CF_API_TOKEN");
         expect(template).not.toContain("walrus_aggregator_host");
         expect(template).not.toContain("walrus_upload_relay_host");
     });
@@ -511,7 +550,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
         expect(template).toContain("ExecStart=$vsock_proxy_path 18080 127.0.0.1 18081");
         expect(template).toContain(
-            'printf \'%s\\n\' "earthquake.usgs.gov:443" "$world_id_api_host:443" "graphql.mainnet.sui.io:443" "graphql.testnet.sui.io:443" "graphql.devnet.sui.io:443" >/opt/sonari/earthquake-egress-allowlist',
+            'printf \'%s\\n\' "earthquake.usgs.gov:443" "$residence_r2_host:443" "$world_id_api_host:443" "graphql.mainnet.sui.io:443" "graphql.testnet.sui.io:443" "graphql.devnet.sui.io:443" >/opt/sonari/earthquake-egress-allowlist',
         );
         // Exactly one earthquake CONNECT proxy and one earthquake vsock proxy unit.
         expect(
@@ -546,7 +585,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         // The World ID API host is included in the shared egress allowlist so the
         // CONNECT proxy permits exactly the canonical World ID destination on 443.
         expect(template).toContain(
-            '"earthquake.usgs.gov:443" "$world_id_api_host:443" "graphql.mainnet.sui.io:443"',
+            '"earthquake.usgs.gov:443" "$residence_r2_host:443" "$world_id_api_host:443" "graphql.mainnet.sui.io:443"',
         );
         // The legacy host-controlled localhost World ID tunnel (vsock-proxy 8000 ->
         // host:443) and its upstream-base env are gone; egress is unified on the proxy.
@@ -979,6 +1018,15 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             NitroEnclaveCpuCount: 1,
             NitroEnclaveMemoryMiB: 4,
             NitroEnclaveProcessCommand: 35,
+            GeoResolution: 1,
+            ResidenceAllowlistVersion: 1,
+            ResidenceR2BaseUrl: 62,
+            ResidenceR2Bucket: 28,
+            ResidenceR2ObjectPrefix: 20,
+            ResidenceRoot: 66,
+            ResidenceSourceHash: 66,
+            ResidenceTileManifestKey: 39,
+            ResidenceTileManifestSha256: 64,
             RelayerNetwork: 7,
             RunnerTokenSecretArn: 106,
             SigningMaterialKmsKey: 36,

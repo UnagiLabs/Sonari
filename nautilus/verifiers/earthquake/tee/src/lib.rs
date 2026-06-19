@@ -14,8 +14,16 @@ pub use core::artifacts::{
     SourceManifest, StoredSourceRef, UnsignedPayload,
 };
 pub use core::processing::{
-    process_usgs, process_usgs_archived, process_usgs_archived_with_event_revision,
-    process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
+    AffectedCellLandClassifier, AllAffectedCellsLandClassifier, LandClassification, process_usgs,
+    process_usgs_archived, process_usgs_archived_with_event_revision,
+    process_usgs_archived_with_event_revision_and_classifier, process_usgs_from_worker_request,
+    process_usgs_from_worker_request_with_classifier, process_usgs_with_signer,
+    process_usgs_with_source_archive,
+};
+pub use core::residence_tiles::{
+    RESIDENCE_TILE_CLASSIFIER_NAME, RESIDENCE_TILE_PARENT_RESOLUTION, ResidenceTileClassifier,
+    ResidenceTileConfig, ResidenceTileError, ResidenceTileInventoryEntry, ResidenceTileManifest,
+    ResidenceTileSet, ResidenceTileSource, ResidenceTileSourceHttp,
 };
 pub use core::source_archive::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, SourceArchive, SourceArchiveError, WalrusCliSourceArchive,

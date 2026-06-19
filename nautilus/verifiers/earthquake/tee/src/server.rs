@@ -11,9 +11,11 @@ use crate::core::artifacts::{
     AffectedCellsArtifact, EvidenceManifest, RawDataManifest, StoredSourceRef, UnsignedPayload,
 };
 use crate::{
-    OracleOutput, OracleStatus, UsgsOracleInput, WalrusCliSourceArchive,
-    WalrusCliSourceArchiveConfig, WorkerToTeeRequest, grid_xml_from_artifact,
-    process_usgs_archived_with_event_revision, process_usgs_from_worker_request,
+    OracleOutput, OracleStatus, ResidenceTileClassifier, ResidenceTileConfig,
+    ResidenceTileSourceHttp, UsgsOracleInput, WalrusCliSourceArchive, WalrusCliSourceArchiveConfig,
+    WorkerToTeeRequest, grid_xml_from_artifact,
+    process_usgs_archived_with_event_revision_and_classifier,
+    process_usgs_from_worker_request_with_classifier,
 };
 use serde::Serialize;
 use sonari_tee_core::{HandlerError, ProcessDataHandler, ProcessOutput, TeeContext};
@@ -83,6 +85,7 @@ pub enum TeeJsonResult {
 #[derive(Debug, Clone, Default)]
 pub struct EarthquakeProcessHandler {
     archive_config: Option<WalrusCliSourceArchiveConfig>,
+    residence_tile_config: Option<ResidenceTileConfig>,
 }
 
 impl EarthquakeProcessHandler {
@@ -93,6 +96,7 @@ impl EarthquakeProcessHandler {
     pub fn new() -> Self {
         Self {
             archive_config: None,
+            residence_tile_config: None,
         }
     }
 
@@ -100,6 +104,17 @@ impl EarthquakeProcessHandler {
     pub fn with_archive_config(archive_config: WalrusCliSourceArchiveConfig) -> Self {
         Self {
             archive_config: Some(archive_config),
+            residence_tile_config: None,
+        }
+    }
+
+    pub fn with_runtime_configs(
+        archive_config: WalrusCliSourceArchiveConfig,
+        residence_tile_config: ResidenceTileConfig,
+    ) -> Self {
+        Self {
+            archive_config: Some(archive_config),
+            residence_tile_config: Some(residence_tile_config),
         }
     }
 }
@@ -110,7 +125,12 @@ impl ProcessDataHandler for EarthquakeProcessHandler {
             serde_json::from_slice(input).map_err(|error| process_failed(error.to_string()))?;
         let request = WorkerToTeeRequest::from_json_value(payload)
             .map_err(|error| process_failed(error.to_string()))?;
-        let output = run_earthquake_pipeline(request, ctx, self.archive_config.as_ref())?;
+        let output = run_earthquake_pipeline(
+            request,
+            ctx,
+            self.archive_config.as_ref(),
+            self.residence_tile_config.as_ref(),
+        )?;
         process_output_from_oracle(output)
     }
 }
@@ -144,6 +164,7 @@ fn run_earthquake_pipeline(
     request: WorkerToTeeRequest,
     ctx: &TeeContext,
     archive_config: Option<&WalrusCliSourceArchiveConfig>,
+    residence_tile_config: Option<&ResidenceTileConfig>,
 ) -> Result<OracleOutput, HandlerError> {
     let detail_url = usgs_detail_url(&request.source_event_id);
     let client = production_http_client(ctx).map_err(|error| process_failed(error.to_string()))?;
@@ -180,8 +201,14 @@ fn run_earthquake_pipeline(
     };
     let input = build_production_input(parts, observed_at_ms);
     let event_revision = request.event_revision;
-    let preliminary = process_usgs_from_worker_request(request, input.clone())
-        .map_err(|error| process_failed(error.to_string()))?;
+    let residence_tile_config = residence_tile_config.cloned().ok_or_else(|| {
+        process_failed("finalized request requires an injected residence tile configuration")
+    })?;
+    let tile_source = ResidenceTileSourceHttp::new(&client);
+    let classifier = ResidenceTileClassifier::new(&residence_tile_config, &tile_source);
+    let preliminary =
+        process_usgs_from_worker_request_with_classifier(request, input.clone(), &classifier)
+            .map_err(|error| process_failed(error.to_string()))?;
     if preliminary.result.status != OracleStatus::Finalized {
         return Ok(preliminary);
     }
@@ -191,8 +218,13 @@ fn run_earthquake_pipeline(
     })?;
     let archive = WalrusCliSourceArchive::new(archive_config)
         .map_err(|error| process_failed(error.to_string()))?;
-    process_usgs_archived_with_event_revision(input, event_revision, &archive)
-        .map_err(|error| process_failed(error.to_string()))
+    process_usgs_archived_with_event_revision_and_classifier(
+        input,
+        event_revision,
+        &archive,
+        &classifier,
+    )
+    .map_err(|error| process_failed(error.to_string()))
 }
 
 fn pending_source(source_event_id: &str, error_code: &str) -> Result<OracleOutput, HandlerError> {

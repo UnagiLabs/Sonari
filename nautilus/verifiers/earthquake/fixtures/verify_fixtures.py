@@ -142,6 +142,13 @@ EVIDENCE_AFFECTED_ORDER = [
     "hash",
     "root",
     "count",
+    "total_cell_count",
+    "land_cell_count",
+    "water_cell_count",
+    "land_allowlist_version",
+    "land_allowlist_root",
+    "land_allowlist_source_hash",
+    "land_classifier",
     "geo_resolution",
 ]
 
@@ -256,6 +263,8 @@ def hex_bytes(value: str) -> bytes:
 def ordered(value: Any, order: list[str], item_order: list[str] | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key in order:
+        if key not in value:
+            continue
         item = value[key]
         if isinstance(item, list) and item_order is not None:
             out[key] = [ordered(child, item_order) for child in item]
@@ -635,7 +644,13 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
         "uri": f"ipfs://sonari/examples/{payload['source_event_id']}/affected_cells.json",
         "hash": affected_cells_data_hash,
         "root": affected_cells_root,
-        "count": len(affected["affected_cells"]),
+        "count": payload["affected_cell_count"],
+        "total_cell_count": len(affected["affected_cells"]),
+        "land_cell_count": payload["affected_cell_count"],
+        "water_cell_count": len(affected["affected_cells"]) - payload["affected_cell_count"],
+        "land_allowlist_version": 0,
+        "land_allowlist_root": "0x" + "00" * 32,
+        "land_classifier": "all_affected_cells_land_compat_v1",
         "geo_resolution": affected["geo_resolution"],
     }
     if evidence_manifest.get("affected_cells") != expected_affected_cells:
@@ -679,11 +694,12 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
     payload_checks = {
         "affected_cells_root": affected_cells_root,
         "evidence_manifest_hash": evidence_manifest_hash,
-        "affected_cell_count": len(affected["affected_cells"]),
     }
     for key, value in payload_checks.items():
         if payload.get(key) != value:
             fail(f"{case_id}: payload.{key} mismatch")
+    if not 1 <= payload["affected_cell_count"] <= len(affected["affected_cells"]):
+        fail(f"{case_id}: payload.affected_cell_count mismatch")
 
     if sample_proof["target_leaf"] not in leaf_hashes:
         fail(f"{case_id}: sample_proof target leaf does not match a fixture leaf")

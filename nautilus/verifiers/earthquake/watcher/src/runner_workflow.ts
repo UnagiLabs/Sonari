@@ -1159,6 +1159,21 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 }
                 try {
                     const result = await readTeeResultFromS3(options, event);
+                    if (result.status !== "finalized") {
+                        await repository.markFloorCensusResult(
+                            event.source_event_id,
+                            { status: "skipped", message: "TEE result is not finalized" },
+                            nowMs,
+                            event.attempt,
+                        );
+                        return retainVerifierKind({
+                            source_event_id: event.source_event_id,
+                            attempt: event.attempt,
+                            floor_census: "skipped",
+                            result_s3_key: event.result_s3_key,
+                            result_status: result.status,
+                        });
+                    }
                     const floorCensus =
                         options.floorCensus ??
                         (await buildCensusTeeFloorCensusFromConfig(options, event, nowMs));
@@ -2240,7 +2255,7 @@ function affectedCellsProofRegistrationInput(
         affected_cells_uri: affectedCellsRef.uri,
         affected_cells_hash: affectedCellsRef.source_hash,
         affected_cells_root: payload.affected_cells_root,
-        affected_cell_count: payload.affected_cell_count,
+        affected_cell_count: evidenceManifest.affected_cells.total_cell_count,
         geo_resolution: evidenceManifest.affected_cells.geo_resolution,
     };
 }
@@ -2466,7 +2481,10 @@ function evidenceManifestBindingError(input: {
         input.evidenceManifest.affected_cells.hash !== input.affectedCellsRef.source_hash ||
         input.evidenceManifest.affected_cells.root !== input.payload.affected_cells_root ||
         input.evidenceManifest.affected_cells.count !== input.payload.affected_cell_count ||
-        input.evidenceManifest.affected_cells.count !== input.affectedCells.affected_cells.length ||
+        input.evidenceManifest.affected_cells.land_cell_count !==
+            input.payload.affected_cell_count ||
+        input.evidenceManifest.affected_cells.total_cell_count !==
+            input.affectedCells.affected_cells.length ||
         input.evidenceManifest.affected_cells.geo_resolution !==
             input.affectedCells.geo_resolution ||
         input.affectedCellsRef.size_bytes !== input.affectedCellsBytes.byteLength ||

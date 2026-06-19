@@ -76,9 +76,11 @@ flowchart TD
 
   merkle["ステップ 6: Merkleツリー構築<br/>leaf_hashes()<br/>merkle_root_from_leaf_hashes()"]
 
-  bcs["ステップ 7: BCSシリアライゼーション<br/>payload_bcs_bytes(unsigned_payload)<br/>PAYLOAD_FIELD_ORDER の順で変換"]
+  land["ステップ 7: Residence tile 分類<br/>R2 tile_manifest + tile shard<br/>affected cells を land / water に分類"]
 
-  sign["ステップ 8: Ed25519署名<br/>signer.sign_payload(bcs_bytes)<br/>signature + public_key"]
+  bcs["ステップ 8: BCSシリアライゼーション<br/>payload_bcs_bytes(unsigned_payload)<br/>PAYLOAD_FIELD_ORDER の順で変換"]
+
+  sign["ステップ 9: Ed25519署名<br/>signer.sign_payload(bcs_bytes)<br/>signature + public_key"]
 
   output[
     出力: OracleOutput<br/>
@@ -90,6 +92,7 @@ flowchart TD
   pendingMmi[pending_mmi]
   rejectedCancelled[rejected<br/>SHAKEMAP_CANCELLED]
   rejectedNoCells[rejected<br/>NO_AFFECTED_CELLS]
+  rejectedSeaOnly[rejected<br/>SEA_ONLY_AFFECTED_CELLS]
 
   input --> parse --> select --> hasShakeMap
   hasShakeMap -->|いいえ| pendingSource
@@ -99,7 +102,9 @@ flowchart TD
   hasGrid -->|いいえ| pendingMmi
   hasGrid -->|はい| cells --> hasAffectedCells
   hasAffectedCells -->|いいえ| rejectedNoCells
-  hasAffectedCells -->|はい| hash --> merkle --> bcs --> sign --> output
+  hasAffectedCells -->|はい| hash --> merkle --> land
+  land -->|陸セル0件| rejectedSeaOnly
+  land -->|陸セル1件以上| bcs --> sign --> output
 ```
 
 ---
@@ -126,6 +131,22 @@ printf '%s' '{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":
 stdin は `WorkerToTeeRequest` JSON、stdout は `TeeCoreResult` JSON です。`production` command は enclave 内で USGS detail を再取得し、preferred ShakeMap の `download/grid.xml.zip` を優先して取得します。署名には `SONARI_TEE_SIGNING_KEY_SEED` が必須で、dev seed fallback は使いません。finalized output では raw source bytes の SHA-256 と `walrus blob-id --n-shards "$SONARI_WALRUS_N_SHARDS"` で得た deterministic blob id を raw data manifest に入れて署名します。TEE は `walrus store` を実行せず、Walrus への実保存、pin、retry、aggregator fetch による再検証は TEE 外の archiver が担います。`SONARI_WALRUS_N_SHARDS=1000` は対象 Walrus network の shard count と一致必須で、network、protocol、shard count 変更時は VerifierConfig version、PCR、source policy も同時に更新します。
 
 Nitro Enclave 本番環境では外部 network へ直接接続できないため、`SONARI_EARTHQUAKE_EGRESS_PROXY_URL` を `http://127.0.0.1:<port>` に設定します。AWS runner artifact には `vsock-tcp-bridge` が同梱され、enclave 内の `reqwest` はこの local proxy 経由で USGS へ HTTPS CONNECT します。親 EC2 は allowlist 付き transport proxy だけを担当し、USGS response の検証、正規化、hash、BCS payload、署名は enclave 内で行います。
+
+finalized path では、TEE は R2 から public HTTPS 経由で residence tile manifest と必要な tile shard を取得し、affected cells を residence land allowlist に含まれる陸セルと水域セルへ分類します。signed payload の `affected_cell_count` は陸セル数です。`affected_cells_root` は従来どおり ShakeMap から生成した全 affected cells artifact の root で、evidence manifest に `total_cell_count`、`land_cell_count`、`water_cell_count`、`land_allowlist_version`、`land_allowlist_root`、`land_allowlist_source_hash`、`land_classifier` を残します。陸セルが0件の場合は `SEA_ONLY_AFFECTED_CELLS` で rejected とし、payload と署名は生成しません。
+
+Residence tile runtime env は enclave bootstrap で注入します。親 EC2 は public R2 base URL の host を earthquake egress allowlist に入れますが、Cloudflare API token、R2 access key、wrangler credential は TEE/EC2 runtime に渡しません。
+
+| env | 要件 |
+| --- | --- |
+| `SONARI_RESIDENCE_R2_BASE_URL` | public HTTPS の R2/custom domain base URL |
+| `SONARI_RESIDENCE_TILE_MANIFEST_KEY` | R2 上の `tile_manifest.json` object key。`SONARI_RESIDENCE_R2_OBJECT_PREFIX` 配下 |
+| `SONARI_RESIDENCE_TILE_MANIFEST_SHA256` | R2 にアップロード済みの正確な `tile_manifest.json` bytes から計算した lowercase SHA-256 |
+| `SONARI_RESIDENCE_R2_OBJECT_PREFIX` | manifest と tile shard の共通 object prefix |
+| `SONARI_RESIDENCE_R2_BUCKET` | manifest metadata と一致する R2 bucket 名 |
+| `SONARI_RESIDENCE_ALLOWLIST_VERSION` | manifest metadata と一致する allowlist version |
+| `SONARI_GEO_RESOLUTION` | manifest metadata と affected cells contract と一致する H3 resolution |
+| `SONARI_RESIDENCE_ROOT` | manifest metadata と一致する AllowedResidenceCellRegistry root |
+| `SONARI_RESIDENCE_SOURCE_HASH` | 任意。allowlist source hash を evidence manifest に残す場合のみ設定 |
 
 ローカル検証や fixture/debug では、従来どおり file input も使えます。
 

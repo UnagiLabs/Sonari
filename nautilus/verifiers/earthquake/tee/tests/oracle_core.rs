@@ -5,21 +5,50 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use tee::{
-    CELL_AGGREGATION_GRID_POINT_P90, CELL_AGGREGATION_H3_CENTER_BILINEAR, CELL_METRIC_USGS_MMI,
+    AffectedCellJson, AffectedCellLandClassifier, CELL_AGGREGATION_GRID_POINT_P90,
+    CELL_AGGREGATION_H3_CENTER_BILINEAR, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1,
     CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
     CELLS_GENERATION_METHOD_SHAKEMAP_HDF_H3_WEIGHTED_P90_V1, GEO_RESOLUTION,
     HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100, INTENT_SONARI_EARTHQUAKE_ORACLE,
-    LocalEd25519Signer, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleError, OracleStatus,
-    PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, SourceArchive, SourceArchiveError,
-    StoredSourceRef, UsgsOracleInput, WorkerToTeeRequest, canonical_json_bytes, cell_band,
-    grid_xml_from_artifact, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
-    process_usgs, process_usgs_from_worker_request, process_usgs_with_signer,
+    LandClassification, LocalEd25519Signer, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleError,
+    OracleStatus, PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, SourceArchive,
+    SourceArchiveError, StoredSourceRef, UsgsOracleInput, WorkerToTeeRequest, canonical_json_bytes,
+    cell_band, grid_xml_from_artifact, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
+    process_usgs, process_usgs_from_worker_request,
+    process_usgs_from_worker_request_with_classifier, process_usgs_with_signer,
     process_usgs_with_source_archive, sha256_bytes,
 };
 
 const FIXTURE_DIR: &str = "../fixtures/usgs/finalized_minimal";
 const SIGNING_KEY_SEED: [u8; 32] = [7; 32];
+
+struct FixedLandClassifier {
+    land_cell_count: u64,
+}
+
+impl AffectedCellLandClassifier for FixedLandClassifier {
+    fn classify(
+        &self,
+        affected_cells: &[AffectedCellJson],
+    ) -> Result<LandClassification, OracleError> {
+        let total_cell_count = affected_cells.len() as u64;
+        if self.land_cell_count > total_cell_count {
+            return Err(OracleError::InvalidGridPoint(
+                "test land count exceeds total".to_owned(),
+            ));
+        }
+        Ok(LandClassification {
+            total_cell_count,
+            land_cell_count: self.land_cell_count,
+            water_cell_count: total_cell_count - self.land_cell_count,
+            allowlist_version: 1,
+            allowlist_root: format!("0x{}", "99".repeat(32)),
+            allowlist_source_hash: Some(format!("0x{}", "88".repeat(32))),
+            classifier: "test_fixed_land_count_v1".to_owned(),
+        })
+    }
+}
 
 fn read_fixture(path: impl AsRef<Path>) -> Vec<u8> {
     fs::read(path).expect("fixture should be readable")
@@ -368,6 +397,76 @@ fn worker_request_event_revision_propagates_to_finalized_artifacts() {
     assert_eq!(output.unsigned_payload.as_ref().unwrap().event_revision, 2);
     assert_eq!(output.affected_cells.as_ref().unwrap().event_revision, 2);
     assert_eq!(output.evidence_manifest.as_ref().unwrap().event_revision, 2);
+}
+
+#[test]
+fn worker_request_uses_land_cell_count_for_payload_count_but_keeps_full_root() {
+    let request = WorkerToTeeRequest {
+        source_event_id: "us7000sonari".to_owned(),
+        event_revision: 1,
+        hazard_type: HAZARD_TYPE_EARTHQUAKE,
+        primary_source: PRIMARY_SOURCE_USGS,
+        geo_resolution: GEO_RESOLUTION,
+    };
+    let baseline = process_usgs(finalized_input()).expect("fixture should finalize");
+
+    let output = process_usgs_from_worker_request_with_classifier(
+        request,
+        finalized_input(),
+        &FixedLandClassifier { land_cell_count: 1 },
+    )
+    .expect("classified request should run");
+
+    assert_eq!(output.result.status, OracleStatus::Finalized);
+    let payload = output.unsigned_payload.as_ref().unwrap();
+    assert_eq!(payload.affected_cell_count, 1);
+    assert_eq!(
+        payload.affected_cells_root,
+        baseline
+            .unsigned_payload
+            .as_ref()
+            .unwrap()
+            .affected_cells_root
+    );
+    assert_eq!(
+        output.affected_cells.as_ref().unwrap().affected_cells.len(),
+        2
+    );
+    let manifest = output.evidence_manifest.as_ref().unwrap();
+    assert_eq!(manifest.affected_cells.count, 1);
+    assert_eq!(manifest.affected_cells.total_cell_count, 2);
+    assert_eq!(manifest.affected_cells.land_cell_count, 1);
+    assert_eq!(manifest.affected_cells.water_cell_count, 1);
+    assert_eq!(
+        manifest.affected_cells.land_classifier,
+        "test_fixed_land_count_v1"
+    );
+}
+
+#[test]
+fn worker_request_rejects_when_all_affected_cells_are_water() {
+    let request = WorkerToTeeRequest {
+        source_event_id: "us7000sonari".to_owned(),
+        event_revision: 1,
+        hazard_type: HAZARD_TYPE_EARTHQUAKE,
+        primary_source: PRIMARY_SOURCE_USGS,
+        geo_resolution: GEO_RESOLUTION,
+    };
+
+    let output = process_usgs_from_worker_request_with_classifier(
+        request,
+        finalized_input(),
+        &FixedLandClassifier { land_cell_count: 0 },
+    )
+    .expect("classified request should run");
+
+    assert_eq!(output.result.status, OracleStatus::Rejected);
+    assert_eq!(
+        output.result.error_code.as_deref(),
+        Some("SEA_ONLY_AFFECTED_CELLS")
+    );
+    assert!(output.unsigned_payload.is_none());
+    assert!(output.affected_cells.is_none());
 }
 
 #[test]

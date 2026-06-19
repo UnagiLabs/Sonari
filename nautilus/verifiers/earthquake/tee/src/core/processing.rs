@@ -1,9 +1,9 @@
 use crate::compute::geo::affected_cells_from_grid_centers;
 use crate::compute::merkle::{merkle_root_from_leaf_hashes, sample_proof};
 use crate::core::artifacts::{
-    AffectedCellsArtifact, EarthquakeEvidence, EvidenceAffectedCells, EvidenceManifest,
-    EvidenceSource, ExpectedHashes, LeafHash, RawDataEntry, RawDataManifest, RawSourceContentHash,
-    SourceEntry, SourceManifest, StoredSourceRef, UnsignedPayload,
+    AffectedCellJson, AffectedCellsArtifact, EarthquakeEvidence, EvidenceAffectedCells,
+    EvidenceManifest, EvidenceSource, ExpectedHashes, LeafHash, RawDataEntry, RawDataManifest,
+    RawSourceContentHash, SourceEntry, SourceManifest, StoredSourceRef, UnsignedPayload,
 };
 use crate::core::source_archive::{SourceArchive, SourceArchiveError};
 use crate::core::types::{
@@ -22,8 +22,53 @@ use crate::{
     ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, PRIMARY_SOURCE_USGS,
 };
 
+const COMPAT_ALL_LAND_CLASSIFIER_NAME: &str = "all_affected_cells_land_compat_v1";
+const COMPAT_ALL_LAND_ALLOWLIST_ROOT: &str =
+    "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LandClassification {
+    pub total_cell_count: u64,
+    pub land_cell_count: u64,
+    pub water_cell_count: u64,
+    pub allowlist_version: u64,
+    pub allowlist_root: String,
+    pub allowlist_source_hash: Option<String>,
+    pub classifier: String,
+}
+
+pub trait AffectedCellLandClassifier {
+    fn classify(
+        &self,
+        affected_cells: &[AffectedCellJson],
+    ) -> Result<LandClassification, OracleError>;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AllAffectedCellsLandClassifier;
+
+impl AffectedCellLandClassifier for AllAffectedCellsLandClassifier {
+    fn classify(
+        &self,
+        affected_cells: &[AffectedCellJson],
+    ) -> Result<LandClassification, OracleError> {
+        let total_cell_count = u64::try_from(affected_cells.len()).map_err(|_| {
+            OracleError::InvalidGridPoint("affected cell count exceeds u64 range".to_owned())
+        })?;
+        Ok(LandClassification {
+            total_cell_count,
+            land_cell_count: total_cell_count,
+            water_cell_count: 0,
+            allowlist_version: 0,
+            allowlist_root: COMPAT_ALL_LAND_ALLOWLIST_ROOT.to_owned(),
+            allowlist_source_hash: None,
+            classifier: COMPAT_ALL_LAND_CLASSIFIER_NAME.to_owned(),
+        })
+    }
+}
+
 pub fn process_usgs(input: UsgsOracleInput) -> Result<OracleOutput, OracleError> {
-    process_usgs_inner(input, 1, None)
+    process_usgs_inner(input, 1, None, &AllAffectedCellsLandClassifier)
 }
 
 pub fn process_usgs_with_source_archive(
@@ -56,7 +101,21 @@ pub fn process_usgs_archived_with_event_revision(
     event_revision: u32,
     archive: &impl SourceArchive,
 ) -> Result<OracleOutput, SourceArchiveError> {
-    let output = process_usgs_inner(input.clone(), event_revision, None)?;
+    process_usgs_archived_with_event_revision_and_classifier(
+        input,
+        event_revision,
+        archive,
+        &AllAffectedCellsLandClassifier,
+    )
+}
+
+pub fn process_usgs_archived_with_event_revision_and_classifier(
+    input: UsgsOracleInput,
+    event_revision: u32,
+    archive: &impl SourceArchive,
+    classifier: &impl AffectedCellLandClassifier,
+) -> Result<OracleOutput, SourceArchiveError> {
+    let output = process_usgs_inner(input.clone(), event_revision, None, classifier)?;
     if output.result.status != OracleStatus::Finalized {
         return Ok(output);
     }
@@ -121,6 +180,9 @@ pub fn process_usgs_archived_with_event_revision(
             "finalized output is missing unsigned payload".to_owned(),
         ))
     })?;
+    let land_classification = classifier
+        .classify(&affected_cells.affected_cells)
+        .map_err(SourceArchiveError::Oracle)?;
     let evidence_manifest = evidence_manifest(
         &detail,
         payload,
@@ -128,7 +190,7 @@ pub fn process_usgs_archived_with_event_revision(
         &affected_cells_ref,
         &to_hex(&sha256_bytes(&affected_cells_bytes)),
         &payload.affected_cells_root,
-        payload.affected_cell_count,
+        &land_classification,
     )
     .map_err(SourceArchiveError::Oracle)?;
     let evidence_manifest_bytes =
@@ -148,6 +210,7 @@ pub fn process_usgs_archived_with_event_revision(
         input,
         event_revision,
         Some(archive_refs),
+        classifier,
     )?)
 }
 
@@ -155,6 +218,7 @@ fn process_usgs_inner(
     input: UsgsOracleInput,
     event_revision: u32,
     archive_refs: Option<UsgsArchiveRefs>,
+    classifier: &impl AffectedCellLandClassifier,
 ) -> Result<OracleOutput, OracleError> {
     if event_revision == 0 {
         return Err(OracleError::WorkerRequest(
@@ -255,6 +319,19 @@ fn process_usgs_inner(
         intensity_scale: INTENSITY_SCALE_NAME.to_owned(),
         affected_cells,
     };
+    let land_classification = classifier.classify(&affected_artifact.affected_cells)?;
+    if land_classification.total_cell_count != affected_artifact.affected_cells.len() as u64 {
+        return Err(OracleError::InvalidGridPoint(
+            "land classifier total count does not match affected cells".to_owned(),
+        ));
+    }
+    if land_classification.land_cell_count == 0 {
+        return Ok(status_only(base_result(
+            OracleStatus::Rejected,
+            Some("SEA_ONLY_AFFECTED_CELLS"),
+            None,
+        )));
+    }
 
     let source_bytes = canonical_json_bytes(&source_manifest)?;
     let raw_bytes = canonical_json_bytes(&raw_data_manifest)?;
@@ -313,7 +390,7 @@ fn process_usgs_inner(
         status: ONCHAIN_STATUS_FINALIZED,
         severity_band,
         affected_cells_root: to_hex(&affected_cells_root),
-        affected_cell_count: affected_artifact.affected_cells.len() as u64,
+        affected_cell_count: land_classification.land_cell_count,
         evidence_manifest_uri,
         evidence_manifest_hash: String::new(),
         verified_at_ms,
@@ -326,7 +403,7 @@ fn process_usgs_inner(
         &affected_cells_ref,
         &to_hex(&affected_cells_data_hash),
         &to_hex(&affected_cells_root),
-        affected_artifact.affected_cells.len() as u64,
+        &land_classification,
     )?;
     let evidence_manifest_bytes = canonical_json_bytes(&evidence_manifest)?;
     let evidence_manifest_hash = sha256_bytes(&evidence_manifest_bytes);
@@ -381,6 +458,18 @@ pub fn process_usgs_from_worker_request(
     request: WorkerToTeeRequest,
     input: UsgsOracleInput,
 ) -> Result<OracleOutput, OracleError> {
+    process_usgs_from_worker_request_with_classifier(
+        request,
+        input,
+        &AllAffectedCellsLandClassifier,
+    )
+}
+
+pub fn process_usgs_from_worker_request_with_classifier(
+    request: WorkerToTeeRequest,
+    input: UsgsOracleInput,
+    classifier: &impl AffectedCellLandClassifier,
+) -> Result<OracleOutput, OracleError> {
     if request.hazard_type != HAZARD_TYPE_EARTHQUAKE
         || request.primary_source != PRIMARY_SOURCE_USGS
         || request.geo_resolution != GEO_RESOLUTION
@@ -398,7 +487,7 @@ pub fn process_usgs_from_worker_request(
         )));
     }
 
-    process_usgs_inner(input, request.event_revision, None)
+    process_usgs_inner(input, request.event_revision, None, classifier)
 }
 
 pub fn process_usgs_with_signer(
@@ -469,7 +558,7 @@ fn evidence_manifest(
     affected_cells_ref: &StoredSourceRef,
     affected_cells_hash: &str,
     affected_cells_root: &str,
-    affected_cell_count: u64,
+    land_classification: &LandClassification,
 ) -> Result<EvidenceManifest, OracleError> {
     let title = detail.properties.title.clone().ok_or_else(|| {
         OracleError::InvalidGridPoint("title is required for evidence manifest".to_owned())
@@ -531,7 +620,14 @@ fn evidence_manifest(
             uri: affected_cells_ref.uri.clone(),
             hash: affected_cells_hash.to_owned(),
             root: affected_cells_root.to_owned(),
-            count: affected_cell_count,
+            count: land_classification.land_cell_count,
+            total_cell_count: land_classification.total_cell_count,
+            land_cell_count: land_classification.land_cell_count,
+            water_cell_count: land_classification.water_cell_count,
+            land_allowlist_version: land_classification.allowlist_version,
+            land_allowlist_root: land_classification.allowlist_root.clone(),
+            land_allowlist_source_hash: land_classification.allowlist_source_hash.clone(),
+            land_classifier: land_classification.classifier.clone(),
             geo_resolution: GEO_RESOLUTION,
         },
     })

@@ -40,7 +40,9 @@ devnet / testnet の dummy World ID proof では、任意 variables として Wo
 - `census-tee.eif`
 - TEE tarball と EIF の checksum file、または取得済み SHA-256 値
 
-`earthquake-tee-artifact.tar.gz` は `bin/tee`、`bin/walrus`、`bin/vsock-tcp-bridge` を含みます。`bin/walrus` は TEE 内で raw source bytes から deterministic blob id を計算するためだけに使い、TEE は `walrus store` を実行しません。Walrus への実保存、pin、retry、aggregator fetch による再検証は TEE 外の archiver が担います。`SONARI_WALRUS_N_SHARDS=1000` は対象 Walrus network の shard count と一致している必要があります。network、protocol、shard count を変える場合は、VerifierConfig version、PCR、source policy を同時に更新してください。runner EC2 は earthquake 用に allowlist 付き HTTPS CONNECT proxy と vsock proxy を systemd で起動し、enclave 側の local proxy URL は `SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080` です。allowlist は USGS に限定します。
+`earthquake-tee-artifact.tar.gz` は `bin/tee`、`bin/walrus`、`bin/vsock-tcp-bridge` を含みます。`bin/walrus` は TEE 内で raw source bytes から deterministic blob id を計算するためだけに使い、TEE は `walrus store` を実行しません。Walrus への実保存、pin、retry、aggregator fetch による再検証は TEE 外の archiver が担います。`SONARI_WALRUS_N_SHARDS=1000` は対象 Walrus network の shard count と一致している必要があります。network、protocol、shard count を変える場合は、VerifierConfig version、PCR、source policy を同時に更新してください。runner EC2 は earthquake 用に allowlist 付き HTTPS CONNECT proxy と vsock proxy を systemd で起動し、enclave 側の local proxy URL は `SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080` です。allowlist は USGS、public residence R2 base URL host、World ID、Sui GraphQL host に限定します。
+
+Residence tile runtime values are non-secret. Set them in the GitHub environment / repo Variables and CloudFormation parameters. Do not inject Cloudflare API token, R2 access key, or wrangler credential into the runner EC2 or TEE. `SONARI_RESIDENCE_TILE_MANIFEST_SHA256` must be computed from the exact `tile_manifest.json` bytes fetched back from R2 after upload.
 
 ```bash
 COMMIT_SHA="$(git rev-parse HEAD)"
@@ -97,6 +99,10 @@ MEMBERSHIP_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/membership-identity-tee-artifa
 MEMBERSHIP_EIF_SHA256="$(sha256sum dist/aws/membership-identity-tee.eif | cut -d ' ' -f 1)"
 CENSUS_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/census-tee-artifact.tar.gz.sha256)"
 CENSUS_EIF_SHA256="$(sha256sum dist/aws/census-tee.eif | cut -d ' ' -f 1)"
+SONARI_RESIDENCE_TILE_MANIFEST_SHA256="$(
+  curl -fsS "${SONARI_RESIDENCE_R2_BASE_URL%/}/$SONARI_RESIDENCE_TILE_MANIFEST_KEY" \
+    | sha256sum | awk '{print $1}'
+)"
 
 pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --commit-sha "$COMMIT_SHA" \
@@ -105,6 +111,14 @@ pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --earthquake-tee-sha256 "$EARTHQUAKE_TEE_SHA256" \
   --earthquake-eif-bucket "$ARTIFACT_BUCKET" \
   --earthquake-eif-sha256 "$EARTHQUAKE_EIF_SHA256" \
+  --residence-r2-base-url "$SONARI_RESIDENCE_R2_BASE_URL" \
+  --residence-tile-manifest-key "$SONARI_RESIDENCE_TILE_MANIFEST_KEY" \
+  --residence-tile-manifest-sha256 "$SONARI_RESIDENCE_TILE_MANIFEST_SHA256" \
+  --residence-r2-object-prefix "$SONARI_RESIDENCE_R2_OBJECT_PREFIX" \
+  --residence-r2-bucket "$SONARI_RESIDENCE_R2_BUCKET" \
+  --residence-allowlist-version "$SONARI_RESIDENCE_ALLOWLIST_VERSION" \
+  --residence-root "$SONARI_RESIDENCE_ROOT" \
+  --geo-resolution "$SONARI_GEO_RESOLUTION" \
   --membership-tee-bucket "$ARTIFACT_BUCKET" \
   --membership-tee-sha256 "$MEMBERSHIP_TEE_SHA256" \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
@@ -142,6 +156,8 @@ aws cloudformation deploy \
   --no-fail-on-empty-changeset
 ```
 
+`SONARI_RESIDENCE_SOURCE_HASH` を evidence manifest に残す場合だけ、deploy plan command に `--residence-source-hash "$SONARI_RESIDENCE_SOURCE_HASH"` を追加します。
+
 初回作成、または environment-specific な stack parameter が必要な更新では、この stack 用に review 済みの account parameter source を使い、同じ command に追加します。artifact parameter は deploy plan の値を維持してください。`LambdaCodeS3Key`、TEE key、checksum 値、`GitCommitSha`、`ScheduleState` を手書きしてはいけません。
 
 GitHub Actions では、`RelayerTarget` を `contracts/Published.toml` の package id から導出し、`RelayerCategoryRegistry` と `RelayerCategoryPool` は同じ package id に紐づく Sui events から resolver が導出します。object id 系の repo-level Variables は使いません。
@@ -156,6 +172,14 @@ if pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --earthquake-tee-sha256 "$EARTHQUAKE_TEE_SHA256" \
   --earthquake-eif-bucket "$ARTIFACT_BUCKET" \
   --earthquake-eif-sha256 "$EARTHQUAKE_EIF_SHA256" \
+  --residence-r2-base-url "$SONARI_RESIDENCE_R2_BASE_URL" \
+  --residence-tile-manifest-key "$SONARI_RESIDENCE_TILE_MANIFEST_KEY" \
+  --residence-tile-manifest-sha256 "$SONARI_RESIDENCE_TILE_MANIFEST_SHA256" \
+  --residence-r2-object-prefix "$SONARI_RESIDENCE_R2_OBJECT_PREFIX" \
+  --residence-r2-bucket "$SONARI_RESIDENCE_R2_BUCKET" \
+  --residence-allowlist-version "$SONARI_RESIDENCE_ALLOWLIST_VERSION" \
+  --residence-root "$SONARI_RESIDENCE_ROOT" \
+  --geo-resolution "$SONARI_GEO_RESOLUTION" \
   --membership-tee-bucket "$ARTIFACT_BUCKET" \
   --membership-tee-sha256 "$MEMBERSHIP_TEE_SHA256" \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
