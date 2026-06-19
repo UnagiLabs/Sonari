@@ -1358,6 +1358,86 @@ h4 {
   color: oklch(0.3 0.06 150);
 }
 
+/* ラベル横の「？」ヒント。ホバー/フォーカスでツールチップを出す。 */
+.value-hint {
+  position: relative;
+  display: inline-flex;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+.value-hint-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--cream-200);
+  color: var(--ink-faint);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
+.value-hint-trigger:hover,
+.value-hint-trigger:focus-visible {
+  background: var(--sage-400);
+  color: oklch(1 0 0);
+}
+
+.value-hint-bubble {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: 240px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--sage-900);
+  color: oklch(1 0 0 / 0.92);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-transform: none;
+  box-shadow: 0 8px 24px oklch(0 0 0 / 0.18);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+  pointer-events: none;
+}
+
+.value-hint:hover .value-hint-bubble,
+.value-hint:focus-within .value-hint-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* AVAILABLE 列の位置に応じてツールチップの寄せ方向を切り替え、はみ出しを防ぐ。
+   3列時は左端列に回り込むため左寄せ、2列時は再び右端列になるため右寄せに戻す。 */
+@media (max-width: 1100px) {
+  .value-hint-bubble {
+    right: auto;
+    left: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .value-hint-bubble {
+    right: 0;
+    left: auto;
+  }
+}
+
 .event-summary {
   display: grid;
   gap: 20px;

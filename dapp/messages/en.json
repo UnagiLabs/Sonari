@@ -722,7 +722,9 @@
             "balance": "Balance",
             "received": "Received",
             "paidOut": "Paid out",
-            "available": "Available"
+            "available": "Available",
+            "availableHint": "The pool balance minus the reserve floor that is always kept aside — the amount actually usable right now. It stays at 0, and differs from the balance, until the balance rises above the reserve floor.",
+            "availableHintLabel": "About “Available”"
         },
         "pools": {
             "main": {
