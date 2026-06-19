@@ -17,6 +17,11 @@ pub use core::processing::{
     process_usgs, process_usgs_archived, process_usgs_archived_with_event_revision,
     process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
 };
+pub use core::residence_tiles::{
+    RESIDENCE_TILE_CLASSIFIER_NAME, RESIDENCE_TILE_PARENT_RESOLUTION, ResidenceTileConfig,
+    ResidenceTileError, ResidenceTileInventoryEntry, ResidenceTileManifest, ResidenceTileSet,
+    ResidenceTileSource, ResidenceTileSourceHttp,
+};
 pub use core::source_archive::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, SourceArchive, SourceArchiveError, WalrusCliSourceArchive,
     WalrusCliSourceArchiveConfig, parse_command_timeout_ms, parse_epochs, parse_n_shards,
