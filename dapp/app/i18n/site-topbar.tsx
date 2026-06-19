@@ -63,14 +63,42 @@ export function SiteTopbar({
                         ))}
                     </nav>
                     <div className="topbar-spacer" />
-                    <LocaleSwitcher current={locale} />
-                    <WalletConnect />
-                    <a
-                        className={`nav-item topbar-mypage${active === "mypage" ? " active" : ""}`}
-                        href={MYPAGE_ITEM.href}
-                    >
-                        {t("nav.mypage")}
-                    </a>
+                    {/* 言語切替・wallet・My Page を 1 つの右クラスタにまとめ、
+                        区切り線で「言語」と「アカウント」の役割を視覚的に分ける。 */}
+                    <div className="topbar-actions">
+                        <LocaleSwitcher current={locale} />
+                        <span aria-hidden="true" className="topbar-divider" />
+                        <WalletConnect />
+                        <a
+                            className={`topbar-mypage${active === "mypage" ? " active" : ""}`}
+                            href={MYPAGE_ITEM.href}
+                        >
+                            <span aria-hidden="true" className="topbar-mypage-avatar">
+                                <svg
+                                    aria-hidden="true"
+                                    fill="none"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    width="14"
+                                >
+                                    <circle
+                                        cx="12"
+                                        cy="8.5"
+                                        r="3.6"
+                                        stroke="currentColor"
+                                        strokeWidth="1.8"
+                                    />
+                                    <path
+                                        d="M5.5 19c1.2-3.2 3.7-4.6 6.5-4.6s5.3 1.4 6.5 4.6"
+                                        stroke="currentColor"
+                                        strokeLinecap="round"
+                                        strokeWidth="1.8"
+                                    />
+                                </svg>
+                            </span>
+                            {t("nav.mypage")}
+                        </a>
+                    </div>
                     <SiteMobileMenu
                         active={active}
                         items={mobileItems}
