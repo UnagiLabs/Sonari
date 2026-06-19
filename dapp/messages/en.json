@@ -19,11 +19,24 @@
                 "comingSoon": "Coming soon"
             },
             "welcome": {
+                "eyebrow": "Register",
                 "title": "Become a Sonari member.",
-                "lead": "Three clear steps: choose your residence area, issue one soulbound Membership SBT, and verify your identity whenever you are ready.",
-                "walletHint": "Connect your Sui wallet to get started.",
-                "walletGoogleTitle": "Google zkLogin creates a Sui address from your Google account.",
-                "walletGoogleBody": "Sonari issues the Membership SBT to the connected Sui address. You can also use another Sui wallet.",
+                "path": {
+                    "residence": {
+                        "title": "Choose your residence area",
+                        "note": "on-chain H3 cell only"
+                    },
+                    "membership": {
+                        "title": "Issue your Membership SBT",
+                        "note": "soulbound"
+                    },
+                    "identity": {
+                        "title": "Verify your identity",
+                        "optional": "optional"
+                    }
+                },
+                "walletHint": "Connect your Sui wallet",
+                "gasFree": "Gas-free",
                 "walletSponsorNote": "No SUI is needed for the first Membership SBT issuance because Sonari sponsors the network fee.",
                 "cta": "Get started",
                 "membership": {

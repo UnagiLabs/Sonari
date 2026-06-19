@@ -3468,13 +3468,152 @@ h4 {
   box-shadow: var(--shadow-sm);
 }
 
-.wizard-wallet-card {
+/*
+ * Welcome ステップ（/register の最初の画面）専用デザイン。
+ * 単一の elevated カードへ「道のりプレビュー → ウォレット接続パネル → CTA」を
+ * まとめる。共有ステッパー（WizardProgress）はカード外（shell 直下）のまま。
+ * 色・影・角丸・フォントはすべて既存のデザイントークンに揃える。
+ */
+.wizard-welcome {
+  padding: 40px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.wizard-welcome-heading {
+  gap: 6px;
+}
+
+/* 道のりプレビュー：番号付き 3 行を薄い罫線で仕切る。 */
+.wizard-path {
   display: flex;
   flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wizard-path-item {
+  display: flex;
   align-items: center;
   gap: 14px;
-  padding: 32px 24px;
-  text-align: center;
+  padding: 13px 2px;
+}
+
+.wizard-path-item + .wizard-path-item {
+  border-top: 1px solid var(--line);
+}
+
+.wizard-path-number {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--sage-100);
+  color: var(--sage-700);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wizard-path-title {
+  flex: 1;
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.wizard-path-optional {
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+
+.wizard-path-note {
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+/* ウォレット接続パネル：cream のカード内で白く浮かせる（影は持たせない）。 */
+.wizard-connect-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-radius: var(--radius-md);
+  box-shadow: none;
+}
+
+.wizard-connect-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wizard-connect-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.wizard-gasfree-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--sage-100);
+  color: var(--sage-700);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wizard-gasfree-badge .wizard-hex-icon {
+  width: 11px;
+  height: 11px;
+}
+
+/* sponsor note：ガス代肩代わりの説明をサージュ淡色で強調する。 */
+.wizard-sponsor-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 11px 13px;
+  border-radius: var(--radius-md);
+  background: var(--sage-100);
+  color: var(--sage-800);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.wizard-sponsor-note .wizard-hex-icon {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--sage-700);
+}
+
+/* Welcome の CTA はカード幅いっぱいに広げる（このステップは戻るボタンがない）。 */
+.wizard-welcome-cta {
+  width: 100%;
+}
+
+@media (max-width: 820px) {
+  .wizard-welcome {
+    padding: 24px 18px;
+  }
+
+  .wizard-path-note {
+    display: none;
+  }
 }
 
 .wizard-sbt-card,
