@@ -26,6 +26,11 @@ describe("buildEmergencyBannerView", () => {
         expect(view?.label).toBe("Earthquake Relief Pool");
     });
 
+    it("propagates disasterEventId when provided", () => {
+        const view = buildEmergencyBannerView({ ...campaign, disasterEventId: "0xevent" });
+        expect(view?.disasterEventId).toBe("0xevent");
+    });
+
     it("returns a stable shape: { campaignId, label }", () => {
         const view = buildEmergencyBannerView(campaign);
         expect(Object.keys(view ?? {})).toStrictEqual(["campaignId", "label"]);

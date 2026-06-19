@@ -6,8 +6,11 @@ import { buildEmergencyBannerView, type EmergencyBannerCampaign } from "./emerge
 export interface EmergencyBannerProps {
     /** 実施中のキャンペーン。null の場合はバナーを表示しない。 */
     readonly campaign: EmergencyBannerCampaign | null;
-    /** 「寄付する」ボタン押下時のコールバック。campaignId はキャンペーンのオブジェクト ID。 */
-    readonly onDonate: (campaignId: string) => void;
+    /**
+     * 「寄付する」ボタン押下時のコールバック。
+     * campaignId はキャンペーンのオブジェクト ID、disasterEventId は特設ページ ID。
+     */
+    readonly onDonate: (campaignId: string, disasterEventId?: string) => void;
     /**
      * 任意。指定すると寄付ボタンの前に主ボタンとしてリンクを表示する（例: 受け取る導線）。
      * バナーを 1 枠に保ったまま、見ている人に合わせたアクションを足すために使う。出すか
@@ -38,9 +41,22 @@ export function EmergencyBanner({
         view.magnitude !== undefined
             ? "donate-emergency-banner donate-emergency-banner--with-magnitude"
             : "donate-emergency-banner";
+    const disasterHref =
+        view.disasterEventId !== undefined ? `/donate/${view.disasterEventId}` : null;
 
     return (
         <div className={bannerClassName} role="alert">
+            {disasterHref !== null ? (
+                <a
+                    aria-label={t("detailLinkLabel", { name: view.label })}
+                    className="donate-emergency-banner-hit-area"
+                    href={disasterHref}
+                >
+                    <span className="donate-emergency-banner-hit-label">
+                        {t("detailLinkLabel", { name: view.label })}
+                    </span>
+                </a>
+            ) : null}
             <div className="donate-emergency-banner-rail" aria-hidden="true" />
             {view.magnitude !== undefined ? (
                 <dl className="donate-emergency-banner-magnitude">
@@ -78,7 +94,7 @@ export function EmergencyBanner({
                         type="button"
                         className="donate-emergency-banner-cta btn"
                         onClick={() => {
-                            onDonate(view.campaignId);
+                            onDonate(view.campaignId, view.disasterEventId);
                         }}
                     >
                         {t("cta")}

@@ -13,6 +13,8 @@ export interface EmergencyBannerDetail {
 export interface EmergencyBannerCampaign {
     /** キャンペーンのオブジェクト ID（寄付導線で使う） */
     readonly id: string;
+    /** 対象災害のオブジェクト ID。特設寄付ページ `/donate/<disasterEventId>` への導線で使う。 */
+    readonly disasterEventId?: string;
     /** 表示用ラベル */
     readonly label: string;
     /** 任意。実施中などのステータス表示文言（ローカライズ済み）。未指定なら非表示。 */
@@ -25,6 +27,8 @@ export interface EmergencyBannerCampaign {
 export interface EmergencyBannerView {
     /** キャンペーンのオブジェクト ID（onDonate コールバックへ渡す値） */
     readonly campaignId: string;
+    /** 対象災害のオブジェクト ID。未指定ならバナー全体リンクは出さない。 */
+    readonly disasterEventId?: string;
     /** バナーに表示するキャンペーン名 */
     readonly label: string;
     /** 任意。実施中などのステータス表示文言。未指定なら非表示。 */
@@ -65,6 +69,9 @@ export function buildEmergencyBannerView(
         extractMagnitudeFromLabel(campaign.label);
     return {
         campaignId: campaign.id,
+        ...(campaign.disasterEventId !== undefined
+            ? { disasterEventId: campaign.disasterEventId }
+            : {}),
         label: campaign.label,
         ...(campaign.status !== undefined ? { status: campaign.status } : {}),
         ...(campaign.details !== undefined && campaign.details.length > 0
