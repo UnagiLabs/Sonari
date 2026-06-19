@@ -144,42 +144,64 @@
                 }
             },
             "membership": {
-                "title": "メンバーシップ SBT を発行",
-                "lead": "先に居住地を選び、そのセルに対してウォレットごとに1つの譲渡不可メンバーシップを発行します。譲渡はできず、保有しても支援の保証や優先順位にはなりません。",
-                "card": {
-                    "objectType": "オブジェクト種別",
-                    "objectTypeValue": "メンバーシップ SBT",
-                    "owner": "所有者",
-                    "ownerPlaceholder": "接続中のウォレット",
+                "eyebrow": "メンバーシップ",
+                "title": "メンバーシップを確認",
+                "lead": "発行されるパスと、オンチェーンに記録される内容そのものです。それ以外がデバイスから出ることはありません。",
+                "pass": {
+                    "kicker": "メンバーシップ",
+                    "name": "ソウルバウンドパス",
+                    "subtitle": "譲渡不可 · ウォレットに紐付け",
+                    "issuedBadge": "発行済み",
+                    "sbtBadge": "SBT",
+                    "residenceLabel": "居住セル",
+                    "residencePlaceholder": "未選択",
+                    "walletLabel": "ウォレット",
+                    "walletPlaceholder": "未接続",
+                    "networkLabel": "ネットワーク",
+                    "networkValue": "Sui"
+                },
+                "benefits": {
+                    "label": "メンバーシップに含まれるもの",
+                    "relief": {
+                        "title": "Relief Cash の対象資格",
+                        "body": "居住セルで災害が宣言された際の給付対象になります。"
+                    },
+                    "pass": {
+                        "title": "ソウルバウンドパス 1 つ",
+                        "body": "ウォレットに紐付き、売却・譲渡・委任はできません。"
+                    },
+                    "free": {
+                        "title": "発行は無料",
+                        "body": "ガス代は Sonari が負担します。登録で課金されることはありません。"
+                    }
+                },
+                "onchain": {
+                    "label": "オンチェーンに記録される内容",
+                    "type": "種別",
+                    "typeValue": "ソウルバウンドメンバーシップ（SBT）",
                     "residence": "居住セル",
                     "residencePlaceholder": "未選択",
-                    "transfer": "譲渡",
-                    "transferValue": "不可",
-                    "status": "ステータス",
-                    "statusValue": "未発行",
-                    "statusChecking": "確認中",
-                    "statusReady": "発行準備完了",
-                    "statusIssued": "発行済み",
-                    "statusSubmitting": "送信中",
-                    "statusMultiple": "複数検出"
+                    "network": "ネットワーク",
+                    "networkValue": "Sui",
+                    "cost": "費用",
+                    "costValue": "無料 · スポンサー負担"
                 },
+                "privacy": "正確な住所や GPS 履歴がデバイスから出たり保存されたりすることはありません。",
+                "gasFreeHint": "ガス代不要 — Sonari が負担 · 約2秒",
+                "issuedFlag": "メンバーシップを発行しました — Sui に記録されました。",
                 "issue": {
-                    "button": "メンバーシップ SBT を発行",
-                    "buttonIssued": "続ける",
+                    "button": "メンバーシップを発行",
+                    "buttonIssued": "本人確認へ進む",
                     "connectWallet": "メンバーシップ SBT を発行するにはウォレットを接続してください。",
                     "residenceRequired": "発行する前に居住エリアを選択してください。",
                     "ready": "この居住エリアに対するメンバーシップ SBT を発行できます。",
                     "checking": "このウォレットにメンバーシップ SBT があるか確認中…",
                     "alreadyIssued": "このウォレットにはすでにメンバーシップ SBT があります。次へ進んでください。",
                     "submitting": "ウォレットでトランザクションを承認してください。",
-                    "sponsorNoteTitle": "初回メンバーシップ SBT のガス代は Sonari が負担します。",
-                    "sponsorNoteBody": "接続中の Sui アドレスに、この居住セルのメンバーシップ SBT を発行します。",
-                    "signatureNote": "送信前に、スポンサー付きトランザクションをウォレットで確認して署名します。",
                     "preparing": "メンバーシップ SBT トランザクションを準備しています。",
                     "sponsoring": "ガス代不要のメンバーシップ SBT トランザクションを準備しています。",
                     "signing": "ウォレットでスポンサー付きメンバーシップ SBT トランザクションを承認してください。",
                     "executing": "メンバーシップ SBT をオンチェーンで発行しています。",
-                    "issued": "メンバーシップ SBT を発行しました。",
                     "notConfigured": "メンバーシップの発行設定がありません。",
                     "lookupFailed": "メンバーシップ SBT を照会できませんでした。",
                     "multiple": "このウォレットには複数のメンバーシップ SBT が見つかりました。次へ進む前にサポートへ連絡してください。",

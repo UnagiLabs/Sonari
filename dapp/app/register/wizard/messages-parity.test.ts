@@ -212,12 +212,14 @@ describe("messages catalog parity", () => {
         }
     });
 
-    it("membership 発行の sponsor 説明と段階別エラー文言を catalog で管理する", () => {
+    it("membership 発行の段階別状態・エラー文言を catalog で管理する", () => {
+        // 発行フローの submitting フェーズ（preparing 等）と段階別エラー（prepareFailed 等）の
+        // 文言は機能的に必須。Claude Design 取り込み後も catalog から消えないことを固定する。
         const keys = [
-            "register.wizard.membership.issue.sponsorNoteTitle",
-            "register.wizard.membership.issue.sponsorNoteBody",
-            "register.wizard.membership.issue.signatureNote",
             "register.wizard.membership.issue.preparing",
+            "register.wizard.membership.issue.sponsoring",
+            "register.wizard.membership.issue.signing",
+            "register.wizard.membership.issue.executing",
             "register.wizard.membership.issue.prepareFailed",
             "register.wizard.membership.issue.sponsorFailed",
             "register.wizard.membership.issue.signatureRejected",
@@ -229,12 +231,66 @@ describe("messages catalog parity", () => {
         }
     });
 
-    it("membership step は sponsor 説明と prepare 状態を実際に参照する", () => {
-        expect(membershipStepSource).toContain('t("issue.sponsorNoteTitle")');
-        expect(membershipStepSource).toContain('t("issue.sponsorNoteBody")');
-        expect(membershipStepSource).toContain('t("issue.signatureNote")');
+    it("membership Step（Claude Design 取り込み）の新文言を catalog で管理する", () => {
+        // パス／特典／オンチェーン台帳／プライバシーノートの新コピーを en/ja 両方で管理する。
+        const keys = [
+            "register.wizard.membership.pass.name",
+            "register.wizard.membership.pass.issuedBadge",
+            "register.wizard.membership.benefits.relief.title",
+            "register.wizard.membership.benefits.pass.title",
+            "register.wizard.membership.benefits.free.title",
+            "register.wizard.membership.onchain.label",
+            "register.wizard.membership.onchain.typeValue",
+            "register.wizard.membership.onchain.costValue",
+            "register.wizard.membership.privacy",
+            "register.wizard.membership.gasFreeHint",
+            "register.wizard.membership.issuedFlag",
+        ];
+        for (const key of keys) {
+            expect(en.has(key), key).toBe(true);
+            expect(ja.has(key), key).toBe(true);
+        }
+    });
+
+    it("membership step は新デザインの主要文言と prepare 状態・段階別エラーを実際に参照する", () => {
+        // 見た目は変わっても、prepare フェーズ表示と段階別エラー写像（機能）は維持する。
         expect(membershipStepSource).toContain('phase: "prepare"');
         expect(membershipStepSource).toContain("membershipIssueFailureMessageKey(error.stage)");
+        // 新デザインのパス・台帳・確定フラグを参照していることを固定する。
+        expect(membershipStepSource).toContain('t("pass.name")');
+        expect(membershipStepSource).toContain('t("onchain.label")');
+        expect(membershipStepSource).toContain('t("issuedFlag")');
+        expect(membershipStepSource).toContain('t("gasFreeHint")');
+    });
+
+    it("旧 membership カード／sponsor ノートの文言キーを残さない", () => {
+        // Claude Design 取り込みで、key-value カード（card.*）と sponsor/署名ノート、
+        // 未使用の issue.issued を削除した。再追加を防ぐ。
+        const removedMembershipKeys = [
+            "register.wizard.membership.card.objectType",
+            "register.wizard.membership.card.objectTypeValue",
+            "register.wizard.membership.card.owner",
+            "register.wizard.membership.card.ownerPlaceholder",
+            "register.wizard.membership.card.residence",
+            "register.wizard.membership.card.residencePlaceholder",
+            "register.wizard.membership.card.transfer",
+            "register.wizard.membership.card.transferValue",
+            "register.wizard.membership.card.status",
+            "register.wizard.membership.card.statusValue",
+            "register.wizard.membership.card.statusChecking",
+            "register.wizard.membership.card.statusReady",
+            "register.wizard.membership.card.statusIssued",
+            "register.wizard.membership.card.statusSubmitting",
+            "register.wizard.membership.card.statusMultiple",
+            "register.wizard.membership.issue.sponsorNoteTitle",
+            "register.wizard.membership.issue.sponsorNoteBody",
+            "register.wizard.membership.issue.signatureNote",
+            "register.wizard.membership.issue.issued",
+        ];
+        for (const key of removedMembershipKeys) {
+            expect(en.has(key), key).toBe(false);
+            expect(ja.has(key), key).toBe(false);
+        }
     });
 
     it("welcome の connect panel 説明を catalog で管理する", () => {
