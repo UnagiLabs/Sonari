@@ -54,20 +54,18 @@ describe("deriveDashboardViewModel", () => {
         expect(view.metricKeys).toEqual([
             "totalBalance",
             "availableNow",
-            "reservedFloor",
             "confirmedEvents",
         ]);
         expect(view.metricValues).toEqual({
-            totalBalance: "$20.00", // main 12 + earthquake 8
-            availableNow: "$19.00", // (12 - 1) + 8
-            reservedFloor: "$1.00", // main reserve floor
+            totalBalance: "$20", // main 12 + earthquake 8
+            availableNow: "$19", // (12 - 1) + 8
             confirmedEvents: "1", // finalized event present
         });
 
         // プールは Main と Earthquake の2件のみ。Operations は出さない。
         expect(view.pools.map((pool) => pool.key)).toEqual(["main", "earthquake"]);
-        expect(view.pools[0]?.available).toBe("$11.00");
-        expect(view.pools[1]?.available).toBe("$8.00");
+        expect(view.pools[0]?.available).toBe("$11");
+        expect(view.pools[1]?.available).toBe("$8");
 
         expect(view.latestEvent).toEqual({
             present: true,
@@ -137,12 +135,41 @@ describe("deriveFeaturedPools", () => {
         const featured = deriveFeaturedPools(pools, "en");
 
         expect(featured.map((pool) => pool.key)).toEqual(["main", "earthquake"]);
-        expect(featured[0]?.available).toBe("$11.00");
-        expect(featured[0]?.received).toBe("$30.00");
-        expect(featured[0]?.paidOut).toBe("$7.00");
-        expect(featured[1]?.available).toBe("$8.00");
-        expect(featured[1]?.received).toBe("$9.00");
-        expect(featured[1]?.paidOut).toBe("$1.00");
+        expect(featured[0]?.available).toBe("$11");
+        expect(featured[0]?.received).toBe("$30");
+        expect(featured[0]?.paidOut).toBe("$7");
+        expect(featured[1]?.available).toBe("$8");
+        expect(featured[1]?.received).toBe("$9");
+        expect(featured[1]?.paidOut).toBe("$1");
+    });
+
+    it("rounds fractional dollars and compacts large values", () => {
+        const featured = deriveFeaturedPools(
+            {
+                ...pools,
+                main: {
+                    ...pools.main,
+                    balanceUsdc: 100_499_499_999_999n,
+                    totalReceivedUsdc: 1_500_000_000n,
+                    totalFloorFundedUsdc: 499_500_000n,
+                    reserveFloorUsdc: 500_000n,
+                },
+                category: {
+                    ...pools.category,
+                    balanceUsdc: 99_999_999_500_000n,
+                    totalReceivedUsdc: 999_500_000_000n,
+                    totalFloorFundedUsdc: 12_345_678n,
+                },
+            },
+            "en",
+        );
+
+        expect(featured[0]?.balance).toBe("$100M");
+        expect(featured[0]?.received).toBe("$2K");
+        expect(featured[0]?.paidOut).toBe("$500");
+        expect(featured[1]?.balance).toBe("$100M");
+        expect(featured[1]?.received).toBe("$1M");
+        expect(featured[1]?.paidOut).toBe("$12");
     });
 
     it("excludes the operations pool", () => {
@@ -155,9 +182,9 @@ describe("deriveFeaturedPools", () => {
         const featured = deriveFeaturedPools(emptyPools, "en");
 
         expect(featured.map((pool) => pool.key)).toEqual(["main", "earthquake"]);
-        expect(featured[0]?.available).toBe("$0.00");
+        expect(featured[0]?.available).toBe("$0");
         expect(featured[0]?.percentAvailable).toBe(0);
-        expect(featured[1]?.available).toBe("$0.00");
+        expect(featured[1]?.available).toBe("$0");
         expect(featured[1]?.percentAvailable).toBe(0);
     });
 });

@@ -701,10 +701,6 @@
                 "label": "Available now",
                 "meta": "Payable immediately"
             },
-            "reservedFloor": {
-                "label": "Reserved (floor)",
-                "meta": "Main pool floor reserve"
-            },
             "confirmedEvents": {
                 "label": "Confirmed events",
                 "meta": "Signature-verified source data"
@@ -726,7 +722,6 @@
             "balance": "Balance",
             "received": "Received",
             "paidOut": "Paid out",
-            "reserved": "Reserved",
             "available": "Available"
         },
         "pools": {

@@ -6,7 +6,6 @@ import type { DashboardDisasterEvent, StatusKey } from "./dashboard-events";
 export type DashboardMetricKey =
     | "totalBalance"
     | "availableNow"
-    | "reservedFloor"
     | "confirmedEvents";
 export type DashboardPoolKey = "main" | "operations" | "earthquake";
 
@@ -15,7 +14,6 @@ export interface DashboardPoolSummary {
     readonly balance: string;
     readonly received: string;
     readonly paidOut: string;
-    readonly reserved: string;
     readonly available: string;
     readonly percentAvailable: number;
     readonly status: StatusKey;
@@ -46,11 +44,23 @@ export interface DashboardViewModel {
 const METRIC_KEYS: readonly DashboardMetricKey[] = [
     "totalBalance",
     "availableNow",
-    "reservedFloor",
     "confirmedEvents",
 ] as const;
 
+interface CompactUsdUnit {
+    readonly suffix: string;
+    readonly scale: bigint;
+}
+
 const USDC_DECIMALS = 1_000_000n;
+const WHOLE_USD_UNIT: CompactUsdUnit = { suffix: "", scale: 1n };
+const COMPACT_USD_UNITS: readonly CompactUsdUnit[] = [
+    WHOLE_USD_UNIT,
+    { suffix: "K", scale: 1_000n },
+    { suffix: "M", scale: 1_000_000n },
+    { suffix: "B", scale: 1_000_000_000n },
+    { suffix: "T", scale: 1_000_000_000_000n },
+] as const;
 
 export function deriveDashboardViewModel(input: {
     readonly locale: SonariLocale;
@@ -73,7 +83,6 @@ export function deriveDashboardViewModel(input: {
         metricValues: {
             totalBalance: formatUsdc(totalBalance, input.locale),
             availableNow: formatUsdc(availableNow, input.locale),
-            reservedFloor: formatUsdc(input.pools.main.reserveFloorUsdc, input.locale),
             confirmedEvents: formatAmount(confirmedEvents, input.locale),
         },
         pools: deriveFeaturedPools(input.pools, input.locale),
@@ -100,7 +109,6 @@ function deriveMainPool(
         balance: formatUsdc(pool.balanceUsdc, locale),
         received: formatUsdc(pool.totalReceivedUsdc, locale),
         paidOut: formatUsdc(pool.totalFloorFundedUsdc, locale),
-        reserved: formatUsdc(pool.reserveFloorUsdc, locale),
         available: formatUsdc(available, locale),
         percentAvailable: percentOf(available, pool.balanceUsdc),
         status: "active",
@@ -116,7 +124,6 @@ function deriveCategoryPool(
         balance: formatUsdc(pool.balanceUsdc, locale),
         received: formatUsdc(pool.totalReceivedUsdc, locale),
         paidOut: formatUsdc(pool.totalFloorFundedUsdc, locale),
-        reserved: formatUsdc(0n, locale),
         available: formatUsdc(pool.balanceUsdc, locale),
         percentAvailable: percentOf(pool.balanceUsdc, pool.totalReceivedUsdc),
         status: "active",
@@ -173,11 +180,13 @@ function compactDate(ms: number): string {
 }
 
 function formatUsdc(value: bigint, locale: SonariLocale): string {
-    return formatAmount(bigintToNumber(value) / Number(USDC_DECIMALS), locale, {
+    const dollars = roundDiv(value, USDC_DECIMALS);
+    const compact = compactWholeDollars(dollars);
+    return `${formatAmount(bigintToNumber(compact.value), locale, {
         currency: "USD",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    })}${compact.suffix}`;
 }
 
 function percentOf(value: bigint, total: bigint): number {
@@ -189,6 +198,36 @@ function percentOf(value: bigint, total: bigint): number {
 
 function maxBigint(a: bigint, b: bigint): bigint {
     return a > b ? a : b;
+}
+
+function compactWholeDollars(value: bigint): { readonly value: bigint; readonly suffix: string } {
+    let unitIndex = 0;
+    let unit = WHOLE_USD_UNIT;
+    for (let index = COMPACT_USD_UNITS.length - 1; index > 0; index -= 1) {
+        const candidate = COMPACT_USD_UNITS[index];
+        if (candidate !== undefined && value >= candidate.scale) {
+            unitIndex = index;
+            unit = candidate;
+            break;
+        }
+    }
+
+    let compactValue = roundDiv(value, unit.scale);
+    while (compactValue >= 1_000n && unitIndex < COMPACT_USD_UNITS.length - 1) {
+        const nextUnit = COMPACT_USD_UNITS[unitIndex + 1];
+        if (nextUnit === undefined) {
+            break;
+        }
+        unitIndex += 1;
+        unit = nextUnit;
+        compactValue = roundDiv(value, unit.scale);
+    }
+
+    return { value: compactValue, suffix: unit.suffix };
+}
+
+function roundDiv(value: bigint, divisor: bigint): bigint {
+    return (value + divisor / 2n) / divisor;
 }
 
 function bigintToNumber(value: bigint): number {

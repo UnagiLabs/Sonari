@@ -1220,6 +1220,7 @@ h4 {
 }
 
 .dashboard-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 34px;
 }
 
@@ -1326,7 +1327,7 @@ h4 {
 .pool-row-values {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   margin: 0;
 }
 
@@ -3074,12 +3075,28 @@ h4 {
     grid-template-columns: repeat(2, 1fr);
   }
 
+  .dashboard-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .metric-item:nth-child(2n) {
     border-right: 0;
   }
 
   .metric-item:nth-child(-n + 2) {
     border-bottom: 1px solid var(--line);
+  }
+
+  .dashboard-metrics .metric-item:nth-child(2n) {
+    border-right: 1px solid var(--line);
+  }
+
+  .dashboard-metrics .metric-item:nth-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .dashboard-metrics .metric-item:last-child {
+    border-right: 0;
   }
 
   .dashboard-actions {
