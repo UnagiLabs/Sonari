@@ -726,7 +726,6 @@
             "balance": "Balance",
             "received": "Received",
             "paidOut": "Paid out",
-            "reserved": "Reserved",
             "available": "Available"
         },
         "pools": {

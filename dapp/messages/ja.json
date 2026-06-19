@@ -726,7 +726,6 @@
             "balance": "残高",
             "received": "受領",
             "paidOut": "支払い済み",
-            "reserved": "確保済み",
             "available": "利用可能"
         },
         "pools": {

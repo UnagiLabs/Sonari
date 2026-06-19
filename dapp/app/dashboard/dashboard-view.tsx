@@ -307,10 +307,6 @@ function PoolRow({ pool }: { pool: DashboardPoolSummary }) {
                     <dd>{pool.paidOut}</dd>
                 </div>
                 <div>
-                    <dt>{t("poolRow.reserved")}</dt>
-                    <dd>{pool.reserved}</dd>
-                </div>
-                <div>
                     <dt>{t("poolRow.available")}</dt>
                     <dd className="is-accent">{pool.available}</dd>
                 </div>
