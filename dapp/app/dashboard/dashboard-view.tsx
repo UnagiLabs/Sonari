@@ -307,11 +307,39 @@ function PoolRow({ pool }: { pool: DashboardPoolSummary }) {
                     <dd>{pool.paidOut}</dd>
                 </div>
                 <div>
-                    <dt>{t("poolRow.available")}</dt>
+                    <dt>
+                        {t("poolRow.available")}
+                        {pool.key === "main" ? (
+                            <ValueHint
+                                hintLabel={t("poolRow.availableHintLabel")}
+                                hintText={t("poolRow.availableHint")}
+                            />
+                        ) : null}
+                    </dt>
                     <dd className="is-accent">{pool.available}</dd>
                 </div>
             </dl>
         </article>
+    );
+}
+
+// 値ラベルの横に出す「？」ヒント。ホバー/フォーカスで説明を表示する。
+function ValueHint({
+    hintLabel,
+    hintText,
+}: {
+    readonly hintLabel: string;
+    readonly hintText: string;
+}) {
+    return (
+        <span className="value-hint">
+            <button className="value-hint-trigger" type="button" aria-label={hintLabel}>
+                ?
+            </button>
+            <span className="value-hint-bubble" role="tooltip">
+                {hintText}
+            </span>
+        </span>
     );
 }
 

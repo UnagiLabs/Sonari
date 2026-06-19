@@ -722,7 +722,9 @@
             "balance": "残高",
             "received": "受領",
             "paidOut": "支払い済み",
-            "available": "利用可能"
+            "available": "利用可能",
+            "availableHint": "プール残高から、常に確保しておくリザーブ（下限）を差し引いた、いま実際に使える金額です。残高がリザーブ下限を上回るまでは0と表示され、残高と異なる値になります。",
+            "availableHintLabel": "「利用可能」とは"
         },
         "pools": {
             "main": {
