@@ -15,7 +15,7 @@ export interface EmergencyBannerSectionProps {
      * 「寄付する」押下時の挙動。home は /donate へ遷移、/donate はフォームへ campaign 反映、と
      * ページごとに差し替える。バナーの見た目（データ取得・選定・受け取り CTA 判定）は共通化する。
      */
-    readonly onDonate: (campaignId: string) => void;
+    readonly onDonate: (campaignId: string, disasterEventId?: string) => void;
 }
 
 /**

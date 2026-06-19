@@ -283,7 +283,7 @@ export function HomeView({
 
 // 緊急バナーを描く共通の薄い包み。
 // campaign が null のときは EmergencyBanner 側が何も描かない（非表示）。
-// onDonate は donateHref への遷移に留め、チェーン送金は起こさない（本番・デモとも）。
+// onDonate は donateHref への遷移に留め、チェーン送金は起こさない（デモ用）。
 function HomeEmergencyBannerView({
     campaign,
     donateHref,
@@ -307,10 +307,18 @@ function HomeEmergencyBannerView({
 
 // 本番ホームの緊急バナー。データ取得・選定・受け取り CTA 判定は EmergencyBannerSection に
 // 集約し、/donate の本番バナーと同一データ・同一見た目を共有する。ここでは「寄付する」押下で
-// /donate へ遷移する挙動だけを与える。
+// 対象災害の特設寄付ページへ遷移する挙動だけを与える。
 function HomeEmergencyBanner() {
     const router = useRouter();
-    return <EmergencyBannerSection onDonate={() => router.push("/donate")} />;
+    return (
+        <EmergencyBannerSection
+            onDonate={(_campaignId, disasterEventId) => {
+                router.push(
+                    disasterEventId !== undefined ? `/donate/${disasterEventId}` : "/donate",
+                );
+            }}
+        />
+    );
 }
 
 function SectionHeader({

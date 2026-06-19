@@ -205,7 +205,11 @@ export function selectEmergencyBannerFromClaimCampaigns(
 ): EmergencyBannerCampaign | null {
     for (const campaign of campaigns) {
         if (BigInt(campaign.donationEndMs) > nowMs) {
-            return { id: campaign.campaignId, label: campaign.title };
+            return {
+                id: campaign.campaignId,
+                disasterEventId: campaign.disasterEventId,
+                label: campaign.title,
+            };
         }
     }
     return null;

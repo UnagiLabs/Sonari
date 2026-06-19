@@ -505,6 +505,7 @@
             "liveStatus": "Disaster relief accepting donations",
             "title": "Active Emergency Campaign",
             "body": "A disaster relief campaign is currently accepting donations: {name}",
+            "detailLinkLabel": "Open the disaster relief page for {name}",
             "cta": "Donate to this campaign"
         },
         "category": {

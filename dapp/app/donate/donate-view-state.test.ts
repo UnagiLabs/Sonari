@@ -407,6 +407,7 @@ describe("selectEmergencyBannerFromClaimCampaigns", () => {
         });
         expect(selectEmergencyBannerFromClaimCampaigns([campaign], 1000n)).toEqual({
             id: "0xc1",
+            disasterEventId: "0xevent",
             label: "M 6.3 - 260 km SSE of Dunhuang, China",
         });
     });
@@ -425,6 +426,7 @@ describe("selectEmergencyBannerFromClaimCampaigns", () => {
         const second = makeClaimCampaign({ campaignId: "0xb", title: "Second" });
         expect(selectEmergencyBannerFromClaimCampaigns([first, second], 1000n)).toEqual({
             id: "0xa",
+            disasterEventId: "0xevent",
             label: "First",
         });
     });
