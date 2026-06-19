@@ -1928,6 +1928,134 @@ h4 {
   font-size: 16px;
 }
 
+/* ===========================================================================
+ * Disaster donate split view — /donate/[eventId]
+ * Claude Design import (Disaster Donate.dc.html): 左に災害概要（メトリクス +
+ * 地図）、右にスティッキー寄付カードを並べる 2 カラム。狭い画面では 1 カラムへ
+ * 畳む。すべて .disaster-* / .disaster-split-aside にスコープし、/donate（一般）・
+ * /claim・demo の見た目には影響させない。
+ * ======================================================================== */
+.disaster-donate-page {
+  padding-top: 44px;
+}
+
+/* ヒーローは単一カラム（claim-hero の 2 カラム指定を打ち消す）。 */
+.disaster-hero {
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr);
+  margin-bottom: 26px;
+}
+
+.disaster-breadcrumb {
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+/* ステータスバッジ: pulse するドット + 状態ラベル（design のアンバーアクセント）。 */
+.disaster-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: oklch(0.95 0.055 86);
+}
+
+.disaster-status-badge .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: oklch(0.55 0.13 68);
+}
+
+/* active のときだけドットを脈動させる（ended/paused/closed は静止）。 */
+.disaster-status-badge.is-active .dot {
+  animation: disaster-pulse 1.8s ease-in-out infinite;
+}
+
+.disaster-status-badge .text {
+  color: oklch(0.46 0.11 66);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+@keyframes disaster-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+/* 2 カラム: 左に概要、右にスティッキー寄付カード。 */
+.disaster-split {
+  display: grid;
+  align-items: start;
+  gap: 34px;
+  grid-template-columns: minmax(0, 1fr) 374px;
+}
+
+/* 送金完了後は概要を畳み、寄付カード列を全幅にして完了/領収書を見せる。 */
+.disaster-split.is-submitted {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.disaster-split-main {
+  display: grid;
+  min-width: 0;
+  gap: 22px;
+}
+
+.disaster-split-aside {
+  position: sticky;
+  top: 20px;
+}
+
+.disaster-split.is-submitted .disaster-split-aside {
+  position: static;
+}
+
+/* 左カラムの地図見出しは大きすぎないよう抑える。 */
+.disaster-split-main .panel-header {
+  margin-bottom: 12px;
+}
+
+.disaster-split-main .panel-header h2 {
+  margin-top: 0;
+  font-size: 20px;
+}
+
+/* メトリクスは 3 列（被災セル数・締切・残高）。状態はバッジへ移したため 4 列にしない。 */
+.disaster-metrics-strip {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* 右の寄付カードは不透明な白カード + 影（design のスティッキーカード）。 */
+.disaster-split-aside .donate-form,
+.disaster-split-aside .preview-block {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 1100px) {
+  .disaster-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .disaster-split-aside {
+    position: static;
+  }
+}
+
 .claim-wallet-panel {
   display: grid;
   gap: 16px;

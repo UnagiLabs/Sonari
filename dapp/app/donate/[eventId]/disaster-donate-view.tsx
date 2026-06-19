@@ -226,79 +226,100 @@ export function DisasterDonateView({
             <div className="app">
                 <SiteTopbar active="donate" locale={locale} />
 
-                <main className="page claim-page">
+                <main className="page claim-page disaster-donate-page">
                     {/* 送金成功後は完了/領収書画面に切り替えるため、災害概要の chrome を隠す。 */}
                     {donationSubmitted ? null : (
-                        <>
-                            <header className="claim-hero">
-                                <div>
-                                    <div className="eyebrow">{t("title")}</div>
-                                    <h1>{view.title}</h1>
-                                    <p className="muted">{view.region}</p>
+                        <header className="claim-hero disaster-hero">
+                            <div>
+                                <Link className="text-action disaster-breadcrumb" href="/pools">
+                                    <span aria-hidden="true">‹</span>
+                                    {t("backToPools")}
+                                </Link>
+                                {/* 状態は専用バッジに集約し、メトリクス strip からは外す（design 準拠）。 */}
+                                <div
+                                    className={`disaster-status-badge${
+                                        view.status === "active" ? " is-active" : ""
+                                    }`}
+                                >
+                                    <span className="dot" aria-hidden="true" />
+                                    <span className="text">{t(`status.${view.status}`)}</span>
                                 </div>
-                            </header>
-
-                            {/* 主要指標を簡潔な strip で見せる（被災セル数・寄付締切・残高・状態）。
-                                地域はヒーロー副題に出すため、ここでは出さない。 */}
-                            <section className="metrics-strip" aria-label={view.title}>
-                                <article className="metric-item">
-                                    <div className="label">{t("affectedCellsLabel")}</div>
-                                    <div className="value">
-                                        {view.affectedCellCount.toLocaleString()}
-                                    </div>
-                                </article>
-                                <article className="metric-item">
-                                    <div className="label">{t("donationEndLabel")}</div>
-                                    <div className="value">
-                                        {formatDate(view.donationEndMs, locale) ?? "-"}
-                                    </div>
-                                </article>
-                                <article className="metric-item">
-                                    <div className="label">{t("balanceLabel")}</div>
-                                    <div className="value">{view.balanceLabel}</div>
-                                </article>
-                                <article className="metric-item">
-                                    <div className="label">{t("statusLabel")}</div>
-                                    <div className="value">{t(`status.${view.status}`)}</div>
-                                </article>
-                            </section>
-
-                            {/* 被災エリア地図。artifact が無い（env 未設定 / 未生成）ときも
-                                枠は残し、fallback メッセージを出してページを壊さない。 */}
-                            <section
-                                className="claim-map-section"
-                                aria-labelledby="disaster-donate-map-title"
-                            >
-                                <div className="panel-header">
-                                    <h2 id="disaster-donate-map-title">{t("mapTitle")}</h2>
-                                </div>
-                                {affectedAreaArtifact !== null ? (
-                                    <AffectedAreaMap
-                                        affectedAreaArtifact={affectedAreaArtifact}
-                                        cellSource={{ kind: "deferred" }}
-                                        residenceCell={null}
-                                    />
-                                ) : (
-                                    <p className="muted claim-sub">{t("mapUnavailable")}</p>
-                                )}
-                            </section>
-                        </>
+                                <h1>{view.title}</h1>
+                                <p className="muted">{view.region}</p>
+                            </div>
+                        </header>
                     )}
 
-                    {/* 寄付フォーム（campaign 固定モード・chrome なし embedded）。
-                        ページ chrome（SiteTopbar・背景・main）は本ビューが用意するため、
-                        DonateView は embedded でフォーム部分のみ描画させ二重描画を防ぐ。
-                        送金成功で onSubmittedChange→donationSubmitted=true となり、上の概要を隠して
-                        DonateView 側が完了/領収書画面を描画する。寄付先ラベルは災害名で上書き。 */}
-                    <DonateView
-                        locale={locale}
-                        initialMode="campaign"
-                        initialCampaignId={campaign.campaignId}
-                        lockDestination
-                        embedded
-                        onSubmittedChange={setDonationSubmitted}
-                        destinationLabelOverride={view.title}
-                    />
+                    {/* split view: 左に災害概要（メトリクス + 地図）、右にスティッキー寄付カード。
+                        送金成功後は概要を畳み（is-submitted）、寄付カード列を全幅にして
+                        完了/領収書を見せる。DonateView は単一インスタンスのまま右列に置き続け、
+                        submitted 遷移で再マウントされない（内部 txState を失わせない）。 */}
+                    <div className={`disaster-split${donationSubmitted ? " is-submitted" : ""}`}>
+                        {donationSubmitted ? null : (
+                            <div className="disaster-split-main">
+                                {/* 主要指標を簡潔な strip で見せる（被災セル数・寄付締切・残高）。
+                                    地域はヒーロー副題、状態はバッジに出すため、ここでは出さない。 */}
+                                <section
+                                    className="metrics-strip disaster-metrics-strip"
+                                    aria-label={view.title}
+                                >
+                                    <article className="metric-item">
+                                        <div className="label">{t("affectedCellsLabel")}</div>
+                                        <div className="value">
+                                            {view.affectedCellCount.toLocaleString()}
+                                        </div>
+                                    </article>
+                                    <article className="metric-item">
+                                        <div className="label">{t("donationEndLabel")}</div>
+                                        <div className="value">
+                                            {formatDate(view.donationEndMs, locale) ?? "-"}
+                                        </div>
+                                    </article>
+                                    <article className="metric-item">
+                                        <div className="label">{t("balanceLabel")}</div>
+                                        <div className="value">{view.balanceLabel}</div>
+                                    </article>
+                                </section>
+
+                                {/* 被災エリア地図。artifact が無い（env 未設定 / 未生成）ときも
+                                    枠は残し、fallback メッセージを出してページを壊さない。 */}
+                                <section
+                                    className="claim-map-section"
+                                    aria-labelledby="disaster-donate-map-title"
+                                >
+                                    <div className="panel-header">
+                                        <h2 id="disaster-donate-map-title">{t("mapTitle")}</h2>
+                                    </div>
+                                    {affectedAreaArtifact !== null ? (
+                                        <AffectedAreaMap
+                                            affectedAreaArtifact={affectedAreaArtifact}
+                                            cellSource={{ kind: "deferred" }}
+                                            residenceCell={null}
+                                        />
+                                    ) : (
+                                        <p className="muted claim-sub">{t("mapUnavailable")}</p>
+                                    )}
+                                </section>
+                            </div>
+                        )}
+
+                        {/* 寄付フォーム（campaign 固定モード・chrome なし embedded）。
+                            ページ chrome（SiteTopbar・背景・main）は本ビューが用意するため、
+                            DonateView は embedded でフォーム部分のみ描画させ二重描画を防ぐ。
+                            送金成功で onSubmittedChange→donationSubmitted=true となり、上の概要を隠して
+                            DonateView 側が完了/領収書画面を描画する。寄付先ラベルは災害名で上書き。 */}
+                        <div className="disaster-split-aside">
+                            <DonateView
+                                locale={locale}
+                                initialMode="campaign"
+                                initialCampaignId={campaign.campaignId}
+                                lockDestination
+                                embedded
+                                onSubmittedChange={setDonationSubmitted}
+                                destinationLabelOverride={view.title}
+                            />
+                        </div>
+                    </div>
                 </main>
             </div>
         </>
