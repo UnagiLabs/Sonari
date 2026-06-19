@@ -566,7 +566,7 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euo pipefail
-            dnf install -y awscli amazon-ssm-agent git nodejs npm python3 libstdc++ jq socat aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent git nodejs npm python3 libstdc++ jq socat aws-nitro-enclaves-cli
+            dnf install -y awscli amazon-ssm-agent python3 libstdc++ jq socat aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent python3 libstdc++ jq socat aws-nitro-enclaves-cli
             systemctl enable --now amazon-ssm-agent || true
             usermod -aG ne ec2-user || true
             allocator_spec=/etc/nitro_enclaves/allocator.yaml
@@ -719,7 +719,7 @@ Resources:
               echo "vsock-proxy missing" >&2
               exit 1
             fi
-            cat >/opt/sonari/bin/sonari-earthquake-egress-connect-proxy <<'SONARI_EARTHQUAKE_CONNECT_PROXY'
+            cat >/opt/sonari/bin/sonari-earthquake-egress-connect-proxy <<'ECP'
             #!/usr/bin/env python3
             import select,socket,socketserver,sys
             class S(socketserver.ThreadingTCPServer):
@@ -756,13 +756,13 @@ Resources:
               allowlist=frozenset(l.strip().lower() for l in f if l.strip())
             with S((host,port),H) as s:
               s.allowlist=allowlist;s.serve_forever()
-            SONARI_EARTHQUAKE_CONNECT_PROXY
+            ECP
             chmod 0500 /opt/sonari/bin/sonari-earthquake-egress-connect-proxy
             printf '%s\n' "earthquake.usgs.gov:443" "$residence_r2_host:443" "$world_id_api_host:443" "graphql.mainnet.sui.io:443" "graphql.testnet.sui.io:443" "graphql.devnet.sui.io:443" >/opt/sonari/earthquake-egress-allowlist
             if ! grep -Fq '{address: 127.0.0.1, port: 18081}' /etc/nitro_enclaves/vsock-proxy.yaml; then
               printf '%s\n' '- {address: 127.0.0.1, port: 18081}' >>/etc/nitro_enclaves/vsock-proxy.yaml
             fi
-            cat >/etc/systemd/system/sonari-earthquake-egress-connect-proxy.service <<'SONARI_EARTHQUAKE_CONNECT_PROXY_SERVICE'
+            cat >/etc/systemd/system/sonari-earthquake-egress-connect-proxy.service <<'ECPS'
             [Unit]
             After=network-online.target
             Wants=network-online.target
@@ -773,8 +773,8 @@ Resources:
             ExecStart=/opt/sonari/bin/sonari-earthquake-egress-connect-proxy --listen-port 18081 --allowlist-file /opt/sonari/earthquake-egress-allowlist
             [Install]
             WantedBy=multi-user.target
-            SONARI_EARTHQUAKE_CONNECT_PROXY_SERVICE
-            cat >/etc/systemd/system/sonari-earthquake-egress-vsock-proxy.service <<SONARI_EARTHQUAKE_VSOCK_PROXY_SERVICE
+            ECPS
+            cat >/etc/systemd/system/sonari-earthquake-egress-vsock-proxy.service <<EVPS
             [Unit]
             After=sonari-earthquake-egress-connect-proxy.service nitro-enclaves-allocator.service
             Wants=sonari-earthquake-egress-connect-proxy.service nitro-enclaves-allocator.service
@@ -785,7 +785,7 @@ Resources:
             ExecStart=$vsock_proxy_path 18080 127.0.0.1 18081
             [Install]
             WantedBy=multi-user.target
-            SONARI_EARTHQUAKE_VSOCK_PROXY_SERVICE
+            EVPS
             systemctl daemon-reload
             systemctl enable --now sonari-earthquake-egress-connect-proxy.service
             systemctl enable --now sonari-earthquake-egress-vsock-proxy.service
