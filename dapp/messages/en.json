@@ -10,8 +10,7 @@
                     "consent": "Agreement",
                     "residence": "Residence",
                     "membership": "Membership",
-                    "identity": "Identity",
-                    "done": "Done"
+                    "identity": "Identity"
                 }
             },
             "common": {
@@ -20,7 +19,6 @@
                 "comingSoon": "Coming soon"
             },
             "welcome": {
-                "eyebrow": "Register",
                 "title": "Become a Sonari member.",
                 "lead": "Three clear steps: choose your residence area, issue one soulbound Membership SBT, and verify your identity whenever you are ready.",
                 "walletHint": "Connect your Sui wallet to get started.",
@@ -37,7 +35,6 @@
                 }
             },
             "consent": {
-                "eyebrow": "Agreement",
                 "title": "Review and agree",
                 "lead": "Please read the items below. You can continue once you agree to all of them.",
                 "residenceTitle": "Residence area",
@@ -55,7 +52,6 @@
                 "agreeAll": "I agree to all of the above."
             },
             "residence": {
-                "eyebrow": "Step 1",
                 "title": "Choose your residence area.",
                 "lead": "Search a place or tap the map. Sonari stores only the selected H3 cell — never your raw address or GPS history.",
                 "nextHint": "Select your residence cell to continue.",
@@ -87,11 +83,15 @@
                         "selectable": "Selectable",
                         "disabled": "Unavailable"
                     },
-                    "retryMapLoad": "Retry"
+                    "retryMapLoad": "Retry",
+                    "selectedAreaLabel": "Selected area",
+                    "cellResolutionLabel": "H3 cell · resolution 7",
+                    "noSelectionPrompt": "Tap a cell on the map to set your residence area.",
+                    "privacyNote": "Only the H3 cell is saved on-chain. Your exact address and GPS history never leave your device.",
+                    "mapHint": "Tap a hex to set your area"
                 }
             },
             "membership": {
-                "eyebrow": "Step 2",
                 "title": "Issue your Membership SBT.",
                 "lead": "Choose your residence first, then issue one soulbound membership per wallet. It cannot be transferred, and holding it does not guarantee aid or payout priority.",
                 "card": {
@@ -143,7 +143,6 @@
                 }
             },
             "identity": {
-                "eyebrow": "Optional",
                 "title": "Verify it's you. Now or later.",
                 "lead": "Registration only needs a residence cell and Membership SBT. Come back before payout to complete identity verification.",
                 "routeLegend": "Verification route",
@@ -203,7 +202,6 @@
                 "optionalNotice": "This step is optional. You can finish registration now and verify your identity later."
             },
             "done": {
-                "eyebrow": "All set",
                 "title": "Your registration is ready.",
                 "lead": "Here is what Sonari has recorded for this wallet. You can change identity settings anytime from the member area.",
                 "summary": {

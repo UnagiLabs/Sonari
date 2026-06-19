@@ -19,7 +19,6 @@ export function DoneStep({
     return (
         <section aria-labelledby="wizard-done-title" className="wizard-step-content">
             <header className="wizard-heading">
-                <div className="eyebrow">{t("eyebrow")}</div>
                 <h1 className="wizard-title" id="wizard-done-title">
                     {t("title")}
                 </h1>

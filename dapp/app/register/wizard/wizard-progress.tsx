@@ -21,13 +21,17 @@ export function WizardProgress({ active, state, onNavigate }: WizardProgressProp
     const t = useTranslations("register.wizard.progress");
     const activeIndex = stepIndex(active);
 
+    // 完了画面（done）は進捗ナビに出さない。実際の入力ステップ（5つ）だけを表示し、
+    // カウントもそれに合わせる。done に到達したときは全ステップ完了として扱う。
+    const progressSteps = WIZARD_STEPS.filter((step) => step !== "done");
+    const total = progressSteps.length;
+    const current = Math.min(activeIndex + 1, total);
+
     return (
         <nav aria-label={t("aria")} className="wizard-progress">
-            <p className="wizard-progress-count">
-                {t("stepCount", { current: activeIndex + 1, total: WIZARD_STEPS.length })}
-            </p>
+            <p className="wizard-progress-count">{t("stepCount", { current, total })}</p>
             <ol className="wizard-progress-track">
-                {WIZARD_STEPS.map((step) => {
+                {progressSteps.map((step) => {
                     const index = stepIndex(step);
                     const isReachable = clampStepForState(state, step) === step;
                     const status =

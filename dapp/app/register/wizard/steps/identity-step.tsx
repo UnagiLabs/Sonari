@@ -268,7 +268,6 @@ export function IdentityStep({
     return (
         <section aria-labelledby="wizard-identity-title" className="wizard-step-content">
             <header className="wizard-heading">
-                <div className="eyebrow">{t("eyebrow")}</div>
                 <h1 className="wizard-title" id="wizard-identity-title">
                     {t("title")}
                 </h1>
