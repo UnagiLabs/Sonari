@@ -83,7 +83,7 @@ describe("/donate wallet section removal", () => {
         expect(claimViewSource).not.toContain('t("hero.walletTag")');
         expect(claimViewSource).not.toContain('t("hero.walletBody")');
         expect(claimViewSource).not.toContain("../wallet/wallet-connect");
-        expect(globalsSource).toContain(".claim-wallet-panel");
+        expect(globalsSource).not.toContain(".claim-wallet-panel");
     });
 
     it("donate と claim 一覧が使わない Wallet 文言は detail 用として残す", () => {

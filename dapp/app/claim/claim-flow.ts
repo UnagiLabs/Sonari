@@ -4,6 +4,7 @@ export interface ClaimFlowInput {
     readonly proofReady: boolean;
     readonly proofRequired: boolean;
     readonly walletConnected: boolean;
+    readonly accountVerified: boolean;
     readonly txObjectsReady: boolean;
     readonly worldIdReady: boolean;
     readonly worldIdRequired: boolean;
@@ -34,6 +35,7 @@ export function isClaimFlowActionDisabled(
     if (
         input.inFlight ||
         !input.walletConnected ||
+        !input.accountVerified ||
         !input.txObjectsReady
     ) {
         return true;

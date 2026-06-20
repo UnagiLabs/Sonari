@@ -919,6 +919,9 @@
             "passLoading": "Loading your MembershipPass.",
             "passMissing": "This wallet does not own a MembershipPass.",
             "passFailed": "MembershipPass could not be loaded.",
+            "accountUnverified": "Only accounts with a verified MembershipPass can claim relief.",
+            "eligibilityLoading": "Checking claim eligibility.",
+            "notClaimable": "There is no relief available for this account right now.",
             "worldIdConfigMissing": "World ID configuration is incomplete.",
             "worldIdRequired": "Complete World ID verification before claim verification.",
             "retry": "Retry"
@@ -1005,11 +1008,18 @@
             "notFoundTitle": "Claim not found",
             "notFoundBody": "The specified claim campaign does not exist or has not loaded yet.",
             "mapTitle": "Affected area map",
-            "mapPreviewLabel": "Preview (demo data)",
+            "mapUnavailable": "The affected area map is not available yet for this disaster.",
             "summaryRegion": "Region",
             "summaryBand": "Severity band",
             "summaryAffectedCells": "Affected cells",
-            "summaryDeadline": "Claim deadline"
+            "summaryDeadline": "Claim deadline",
+            "balanceLabel": "Pool balance",
+            "status": {
+                "active": "Active",
+                "ended": "Donation ended",
+                "paused": "Paused",
+                "closed": "Closed"
+            }
         },
         "list": {
             "eyebrow": "Claim relief",

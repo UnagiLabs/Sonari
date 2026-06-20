@@ -400,7 +400,7 @@ h4 {
   box-shadow: 0 0 0 3px oklch(0.68 0.10 150 / 0.18);
 }
 
-/* WalletConnect コンポーネント共通の器。全ページ（topbar / claim / welcome / mypage
+/* WalletConnect コンポーネント共通の器。topbar / welcome / mypage
    など）が同じ <span class="wallet-connect"> を描画するため、dapp-kit ConnectButton の
    配色はここでまとめて指定する（アプリ側は --primary を定義していないので、ここが単一の
    指定箇所になる）。
@@ -2238,6 +2238,31 @@ h4 {
   box-shadow: var(--shadow-md);
 }
 
+.claim-detail-aside {
+  display: grid;
+  gap: 18px;
+}
+
+.claim-detail-aside .claim-summary-panel {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.claim-inline-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
 @media (max-width: 1100px) {
   .disaster-split {
     grid-template-columns: minmax(0, 1fr);
@@ -2246,20 +2271,6 @@ h4 {
   .disaster-split-aside {
     position: static;
   }
-}
-
-.claim-wallet-panel {
-  display: grid;
-  gap: 16px;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: oklch(1 0 0 / 0.68);
-}
-
-.claim-wallet-panel p {
-  color: var(--ink-muted);
-  font-size: 14px;
 }
 
 .claim-layout {
@@ -3958,7 +3969,6 @@ h4 {
   .section-title-row .btn,
   .dashboard-actions .btn,
   .form-actions .btn,
-  .claim-wallet-panel .btn,
   .claim-check-panel .btn {
     width: 100%;
   }
