@@ -942,10 +942,10 @@
             "eyebrow": "Preview",
             "title": "Estimated claim",
             "estimatedRelief": "Estimated Relief Cash",
-            "poolSource": "Pool source",
-            "campaign": "Campaign",
-            "receipt": "Receipt",
-            "receiptValue": "Public, recipient reference anonymized"
+            "amount": "{amount} USDC",
+            "outsideArea": "Not eligible",
+            "checking": "Checking",
+            "unavailable": "-"
         },
         "affectedAreaMap": {
             "ariaLabel": "Map of the affected area",

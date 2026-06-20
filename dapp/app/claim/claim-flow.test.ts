@@ -8,12 +8,9 @@ import {
 function input(overrides: Partial<ClaimFlowInput> = {}): ClaimFlowInput {
     return {
         proofReady: true,
-        proofRequired: true,
         walletConnected: true,
         accountVerified: true,
         txObjectsReady: true,
-        worldIdReady: true,
-        worldIdRequired: true,
         claimable: true,
         inFlight: false,
         ...overrides,
@@ -27,24 +24,8 @@ describe("buildClaimFlowActions", () => {
         ]);
     });
 
-    it("requires affected-cell proof only when the claim path needs it", () => {
+    it("requires affected-cell proof before claiming", () => {
         expect(isClaimFlowActionDisabled("claim", input({ proofReady: false }))).toBe(true);
-        expect(
-            isClaimFlowActionDisabled(
-                "claim",
-                input({ proofRequired: false, proofReady: false }),
-            ),
-        ).toBe(false);
-    });
-
-    it("requires World ID material only when the claim path needs it", () => {
-        expect(isClaimFlowActionDisabled("claim", input({ worldIdReady: false }))).toBe(true);
-        expect(
-            isClaimFlowActionDisabled(
-                "claim",
-                input({ worldIdRequired: false, worldIdReady: false }),
-            ),
-        ).toBe(false);
     });
 
     it("disables claim when there is nothing to receive or a transaction is in flight", () => {
