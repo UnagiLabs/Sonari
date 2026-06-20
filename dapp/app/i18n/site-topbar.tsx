@@ -99,12 +99,21 @@ export function SiteTopbar({
                             {t("nav.mypage")}
                         </a>
                     </div>
-                    <SiteMobileMenu
-                        active={active}
-                        items={mobileItems}
-                        menuLabel={t("menuOpenAria")}
-                        navLabels={navLabels}
-                    />
+                    {/* モバイル専用クラスタ（820px 以下で表示）。デザイン刷新により、
+                        ヘッダー右側は「wallet 接続ボタン + ハンバーガー」を横並びにする。
+                        wallet は本物の接続ボタンを直接見せ（接続後は接続済みプロバイダを表示）、
+                        言語切替はハンバーガー内に寄せる。デスクトップ側の topbar-actions は
+                        CSS で隠さず従来どおり使う。 */}
+                    <div className="topbar-mobile-cluster">
+                        <WalletConnect />
+                        <SiteMobileMenu
+                            active={active}
+                            extras={<LocaleSwitcher current={locale} />}
+                            items={mobileItems}
+                            menuLabel={t("menuOpenAria")}
+                            navLabels={navLabels}
+                        />
+                    </div>
                 </div>
             </header>
             <NetworkMismatchBanner />

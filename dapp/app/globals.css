@@ -374,6 +374,24 @@ h4 {
   box-shadow: var(--shadow-md);
 }
 
+/* ヘッダーから外した言語切替などを、ナビ項目の下に区切って収める差込口。 */
+.nav-menu-extras {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+/*
+ * モバイル専用ヘッダークラスタ（820px 以下でのみ表示）。右側に「wallet 接続ボタン +
+ * ハンバーガー」を横並びにする。デスクトップの topbar-actions（言語・wallet・My Page）
+ * には一切触れない。wallet 接続ボタンのサイズ調整は @media(max-width:820px) 側で行う。
+ */
+.topbar-mobile-cluster {
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+
 .wallet-dot {
   width: 8px;
   height: 8px;
@@ -382,11 +400,49 @@ h4 {
   box-shadow: 0 0 0 3px oklch(0.68 0.10 150 / 0.18);
 }
 
+/* WalletConnect コンポーネント共通の器。全ページ（topbar / claim / welcome / mypage
+   など）が同じ <span class="wallet-connect"> を描画するため、dapp-kit ConnectButton の
+   配色はここでまとめて指定する（アプリ側は --primary を定義していないので、ここが単一の
+   指定箇所になる）。
+   デザイン「Header - Wallet Final」のアウトライン版に合わせ、未接続ボタンも接続後の
+   アカウントチップも白背景＋濃緑文字にする。両状態とも内部は .button.primary（=
+   --primary / --primary-foreground を使用）なので、ここを揃えれば両方に効く。 */
 .wallet-connect {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  --primary: var(--surface);
+  --primary-foreground: oklch(0.3 0.035 150);
+}
+
+/* ボタン本体（web component の trigger part）をアウトラインのピルにする。接続前の
+   「Connect」ボタンも接続後のアカウントチップも exportparts="trigger" を出すため、
+   緑の枠・角丸・太字が両状態に効く。寸法は別途 ::part(trigger)（モバイル）で調整する。 */
+.wallet-connect mysten-dapp-kit-connect-button::part(trigger) {
+  border: 1.5px solid oklch(0.55 0.06 150);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* hover はデザインどおり、ごく薄い緑の地に。 */
+.wallet-connect mysten-dapp-kit-connect-button::part(trigger):hover {
+  background: oklch(0.96 0.02 145);
+}
+
+/* 未接続ボタンの slot 中身（ウォレットアイコン + ラベル）。slot 内は light DOM なので
+   ここで直接整える。slotted の色継承はブラウザ差があるため、デザインの濃緑を明示指定し、
+   アイコン（stroke=currentColor）もその色を継ぐようにする。 */
+.wallet-connect-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: oklch(0.3 0.035 150);
+}
+
+.wallet-connect-icon {
+  flex: none;
 }
 
 .wallet-network-badge {
@@ -397,18 +453,19 @@ h4 {
   white-space: nowrap;
 }
 
-/* SSR の静的 HTML とチャンク読み込み中に表示する接続ボタンの placeholder。 */
+/* SSR の静的 HTML とチャンク読み込み中に表示する接続ボタンの placeholder。
+   読み込み後の本物ボタン（緑アウトライン）と見た目が揃うよう、同じ枠色・文字色にする。 */
 .wallet-connect-fallback {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  border: 1px solid var(--line-strong);
+  padding: 8px 16px;
+  border: 1.5px solid oklch(0.55 0.06 150);
   border-radius: 999px;
   background: var(--surface);
-  color: var(--ink-muted);
-  font-size: 13px;
-  font-weight: 500;
+  color: oklch(0.3 0.035 150);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .page {
@@ -3741,19 +3798,74 @@ h4 {
 }
 
 @media (max-width: 820px) {
+  /* Mobile Top - Final デザイン: ヘッダーは 56px の単一行に絞る。
+     左にブランド、右にアカウント丸ボタンとハンバーガーだけを置く。 */
   .topbar-inner {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 12px;
-    padding: 12px 20px;
+    min-height: 56px;
+    padding: 0 14px 0 16px;
+  }
+
+  /* ブランドはデザインに合わせて少し小ぶりにし、ロゴを枠付きの角丸に収める。 */
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+    border: 1px solid oklch(0.90 0.025 145);
+    border-radius: 9px;
+  }
+
+  .brand-name {
+    font-size: 23px;
   }
 
   .nav {
     display: none;
   }
 
-  /* 狭い画面では My Page 固定リンクもハンバーガーメニューに集約する。 */
+  /* デスクトップの右クラスタ（言語・wallet・My Page）はモバイルでは隠し、
+     代わりに topbar-mobile-cluster を出す。言語と wallet はそちらに集約する。 */
+  .topbar-actions {
+    display: none;
+  }
+
   .topbar-mypage {
     display: none;
+  }
+
+  .topbar-mobile-cluster {
+    display: inline-flex;
+  }
+
+  /* モバイルでは wallet 接続ボタンをヘッダー行に直接置く。NetworkBadge は行を圧迫する
+     ため隠し、ボタンは横並びで中央寄せにする。配色（セージグリーン）は共通の
+     .wallet-connect 側で指定しているため、ここではレイアウトだけ整える。 */
+  .topbar-mobile-cluster .wallet-connect {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .topbar-mobile-cluster .wallet-network-badge {
+    display: none;
+  }
+
+  /* 丸ハンバーガー（40px）と高さを揃え、ピル型に整える。web component の中身は
+     ::part(trigger) で直接整形する（dapp-kit ConnectButton が公開する part）。 */
+  .topbar-mobile-cluster mysten-dapp-kit-connect-button::part(trigger) {
+    height: 40px;
+    min-height: 40px;
+    padding: 0 16px;
+    border-radius: 999px;
+    font-size: 13px;
+  }
+
+  /* 接続前の placeholder（fallback）も同じピル寸法に合わせる。 */
+  .topbar-mobile-cluster .wallet-connect-fallback {
+    height: 40px;
+    padding: 0 16px;
+    border-radius: 999px;
+    font-size: 13px;
   }
 
   .nav-menu {
@@ -6028,6 +6140,64 @@ h4 {
   box-shadow: none;
 }
 
+/* モバイル専用の見出し行（Mobile Top - Final デザイン）。デスクトップでは隠し、
+   狭い画面でのみ「コンパクトな M 値ボックス + 災害名（serif）」を横並びに見せる。 */
+.donate-emergency-banner-lead {
+  display: none;
+  grid-column: 2;
+  align-items: center;
+  gap: 14px;
+  pointer-events: none;
+}
+
+.donate-emergency-banner-magnitude-mini {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid oklch(0.88 0.05 25);
+  border-radius: 12px;
+  background: oklch(0.96 0.035 25);
+}
+
+.donate-emergency-banner-magnitude-mini-label {
+  font-family: var(--donate-emergency-font-sans);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: oklch(0.55 0.1 25);
+}
+
+.donate-emergency-banner-magnitude-mini-value {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  color: oklch(0.48 0.17 25);
+  font-family: var(--donate-emergency-font-sans);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 0.85;
+}
+
+.donate-emergency-banner-magnitude-mini-value span {
+  color: oklch(0.55 0.08 25);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.donate-emergency-banner-name {
+  margin: 0;
+  min-width: 0;
+  color: oklch(0.22 0.055 25);
+  font-family: var(--donate-emergency-font-serif);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.12;
+}
+
 @keyframes donate-emergency-live-pulse {
   0% {
     box-shadow: 0 0 0 0 oklch(0.74 0.08 25 / 0.32);
@@ -6042,37 +6212,80 @@ h4 {
   }
 }
 
-@media (max-width: 760px) {
+/* モバイル（820px 以下）の緊急バナー（Mobile Top - Final デザイン）。
+   ヘッダー刷新と同じブレークポイントに揃え、コンパクトなカードに作り替える。
+   デスクトップ（821px 以上）のレイアウトには一切手を入れない。 */
+@media (max-width: 820px) {
   .donate-emergency-banner,
   .donate-emergency-banner--with-magnitude {
-    grid-template-columns: 6px minmax(0, 1fr);
+    grid-template-columns: 5px minmax(0, 1fr);
+    border-width: 1.5px;
+    border-radius: 18px;
+    box-shadow: 0 14px 34px oklch(0.62 0.18 25 / 0.12);
   }
 
+  /* デスクトップの大きな magnitude セルは畳み、lead 内の mini ボックスに置き換える。 */
   .donate-emergency-banner-magnitude {
-    grid-column: 2;
-    grid-row: 1;
-    padding: 16px 22px;
-    border-right: 0;
-    border-bottom: 1px solid oklch(0.86 0.055 25);
+    display: none;
   }
 
+  /* content を 2 列目に置き、内部を縦並び（header → lead → CTA）にする。
+     pointer-events:none は base のまま残し、カードのタップは hit-area に通す。 */
   .donate-emergency-banner-content,
   .donate-emergency-banner--with-magnitude .donate-emergency-banner-content {
     grid-column: 2;
     grid-row: auto;
-    grid-template-columns: minmax(0, 1fr);
-    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 13px;
+    padding: 15px 16px;
   }
 
-  .donate-emergency-banner-actions {
-    grid-column: 1;
+  /* モバイルでは汎用 title と本文を隠し、災害名を主見出しにする。 */
+  .donate-emergency-banner-title,
+  .donate-emergency-banner-body {
+    display: none;
+  }
+
+  .donate-emergency-banner-lead {
+    display: flex;
+  }
+
+  /* 「LIVE」だけ残し、補足ステータス文（区切り「·」と liveStatus）は隠す。 */
+  .donate-emergency-banner-live > span:nth-child(3),
+  .donate-emergency-banner-live > span:nth-child(4) {
+    display: none;
+  }
+
+  /* CTA は横並び。Claim relief は内容幅、Donate は残り幅いっぱいに伸ばす。 */
+  .donate-emergency-banner-actions,
+  .donate-emergency-banner-actions--with-primary {
+    grid-column: 2;
     grid-row: auto;
-    justify-content: flex-start;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    justify-content: stretch;
+    width: auto;
+  }
+
+  .donate-emergency-banner-actions--with-primary .donate-emergency-banner-cta-primary {
+    flex: none;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    padding: 0 16px;
   }
 
   .donate-emergency-banner-cta {
-    width: 100%;
-    max-width: 100%;
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    min-height: 46px;
+    padding: 0 16px;
+    font-size: 15px;
   }
 }
 

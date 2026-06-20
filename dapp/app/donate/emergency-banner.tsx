@@ -79,6 +79,24 @@ export function EmergencyBanner({
                         <span>{t("liveStatus")}</span>
                     </span>
                 </div>
+                {/* モバイル専用の見出し行（Mobile Top - Final デザイン準拠）。狭い画面では
+                    左の大きなマグニチュード枠を畳み、コンパクトな M 値ボックスの隣に災害名を
+                    serif 見出しとして並べる。デスクトップでは CSS（.donate-emergency-banner-lead）
+                    で非表示にし、従来の magnitude / title / body レイアウトをそのまま使う。 */}
+                <div className="donate-emergency-banner-lead">
+                    {view.magnitude !== undefined ? (
+                        <span className="donate-emergency-banner-magnitude-mini">
+                            <span className="donate-emergency-banner-magnitude-mini-label">
+                                {t("magnitudeLabel")}
+                            </span>
+                            <span className="donate-emergency-banner-magnitude-mini-value">
+                                <span aria-hidden="true">M</span>
+                                {view.magnitude.value}
+                            </span>
+                        </span>
+                    ) : null}
+                    <p className="donate-emergency-banner-name">{view.label}</p>
+                </div>
                 <h2 className="donate-emergency-banner-title">{t("title")}</h2>
                 <p className="donate-emergency-banner-body">{t("body", { name: view.label })}</p>
                 <div
