@@ -340,24 +340,12 @@ describe("messages catalog parity", () => {
         }
     });
 
-    it("register、claim、mypage は WalletConnect を直接描画する", () => {
+    it("register、mypage は WalletConnect を直接描画する", () => {
         const sources = [
             {
                 name: "register welcome",
                 source: welcomeStepSource,
                 importPath: "../../../wallet/wallet-connect",
-                requiresAccountRead: true,
-            },
-            {
-                name: "claim list",
-                source: claimListViewSource,
-                importPath: "../wallet/wallet-connect",
-                requiresAccountRead: false,
-            },
-            {
-                name: "claim detail",
-                source: claimDetailViewSource,
-                importPath: "../../wallet/wallet-connect",
                 requiresAccountRead: true,
             },
             {
@@ -377,5 +365,43 @@ describe("messages catalog parity", () => {
                 expect(source, name).toContain("useCurrentAccount()");
             }
         }
+    });
+
+    it("claim list は WalletConnect を直接描画しない", () => {
+        expect(claimListViewSource).not.toContain(
+            'import { WalletConnect } from "../wallet/wallet-connect";',
+        );
+        expect(claimListViewSource).not.toContain("<WalletConnect />");
+        expect(claimListViewSource).not.toContain("claim-wallet-panel");
+        expect(claimListViewSource).not.toContain("login-entry-point");
+        expect(claimListViewSource).not.toContain("<LoginEntryPoint");
+    });
+
+    it("claim detail は WalletConnect を直接描画しない", () => {
+        expect(claimDetailViewSource).not.toContain(
+            'import { WalletConnect } from "../../wallet/wallet-connect";',
+        );
+        expect(claimDetailViewSource).not.toContain("<WalletConnect />");
+        expect(claimDetailViewSource).not.toContain("claim-wallet-panel");
+        expect(claimDetailViewSource).not.toContain("login-entry-point");
+        expect(claimDetailViewSource).not.toContain("<LoginEntryPoint");
+        expect(claimDetailViewSource).toContain("useCurrentAccount()");
+    });
+
+    it("claim detail の地図は demo preview 経路ではなく affected-area artifact を使う", () => {
+        expect(claimDetailViewSource).toContain("affectedAreaArtifactFromBaseUrl");
+        expect(claimDetailViewSource).toContain('cellSource={{ kind: "deferred" }}');
+        expect(claimDetailViewSource).not.toContain("resolvePreviewCellSource");
+        expect(claimDetailViewSource).not.toContain("resolvePreviewAffectedAreaArtifact");
+        expect(claimDetailViewSource).not.toContain("mapPreviewLabel");
+    });
+
+    it("claim detail の右カラムは claim カードだけを描画する", () => {
+        expect(claimDetailViewSource).toContain("claim-summary-panel");
+        expect(claimDetailViewSource).toContain("WorldIdVerifyButton");
+        expect(claimDetailViewSource).not.toContain('className="claim-pass-panel"');
+        expect(claimDetailViewSource).not.toContain('className="claim-check-panel"');
+        expect(claimDetailViewSource).not.toContain('className="claim-note"');
+        expect(claimDetailViewSource).not.toContain('className="claim-result-panel"');
     });
 });

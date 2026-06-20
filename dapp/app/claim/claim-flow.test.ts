@@ -10,6 +10,7 @@ function input(overrides: Partial<ClaimFlowInput> = {}): ClaimFlowInput {
         proofReady: true,
         proofRequired: true,
         walletConnected: true,
+        accountVerified: true,
         txObjectsReady: true,
         worldIdReady: true,
         worldIdRequired: true,
@@ -49,5 +50,9 @@ describe("buildClaimFlowActions", () => {
     it("disables claim when there is nothing to receive or a transaction is in flight", () => {
         expect(isClaimFlowActionDisabled("claim", input({ claimable: false }))).toBe(true);
         expect(isClaimFlowActionDisabled("claim", input({ inFlight: true }))).toBe(true);
+    });
+
+    it("requires a verified MembershipPass account", () => {
+        expect(isClaimFlowActionDisabled("claim", input({ accountVerified: false }))).toBe(true);
     });
 });

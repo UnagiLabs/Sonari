@@ -919,6 +919,9 @@
             "passLoading": "MembershipPass を読み込んでいます。",
             "passMissing": "このウォレットは MembershipPass を所有していません。",
             "passFailed": "MembershipPass を読み込めませんでした。",
+            "accountUnverified": "認証済みの MembershipPass を持つアカウントのみ支援を受け取れます。",
+            "eligibilityLoading": "受け取り資格を確認しています。",
+            "notClaimable": "現在このアカウントで受け取れる支援金はありません。",
             "worldIdConfigMissing": "World ID 設定が不足しています。",
             "worldIdRequired": "申請の検証前に World ID 検証を完了してください。",
             "retry": "再試行"
@@ -1005,11 +1008,18 @@
             "notFoundTitle": "該当する請求が見つかりません",
             "notFoundBody": "指定された申請キャンペーンは存在しないか、まだ読み込まれていません。",
             "mapTitle": "被災エリアの地図",
-            "mapPreviewLabel": "プレビュー（デモデータ）",
+            "mapUnavailable": "この災害の被災エリア地図はまだ利用できません。",
             "summaryRegion": "地域",
             "summaryBand": "被災バンド",
             "summaryAffectedCells": "影響セル数",
-            "summaryDeadline": "申請締切"
+            "summaryDeadline": "申請締切",
+            "balanceLabel": "プール残高",
+            "status": {
+                "active": "受付中",
+                "ended": "寄付終了",
+                "paused": "一時停止",
+                "closed": "クローズ"
+            }
         },
         "list": {
             "eyebrow": "支援を申請",

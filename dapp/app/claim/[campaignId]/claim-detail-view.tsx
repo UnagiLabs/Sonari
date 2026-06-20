@@ -7,7 +7,7 @@
 // 選択の置換:
 //   - 旧: selectedEventId state + ラジオ選択 UI
 //   - 新: URL の campaignId から selectCampaignById で1件を特定
-// 地図: AffectedAreaMap を resolvePreviewCellSource 経由で表示（デモデータ）。
+// 地図: AffectedAreaMap を affectedAreaArtifactFromBaseUrl 経由で表示する。
 //       地図データは請求の被災セル証明（fetchAffectedCellsProof）とは別経路。
 // ロジック: 引数・分岐・トランザクション構築は claim-view.tsx の意味を保つ。
 // ---------------------------------------------------------------------------
@@ -15,6 +15,7 @@
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { computeIdentityStatementHash } from "@sonari/proof-core";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -22,19 +23,17 @@ import {
     resolveMembershipDappGenesisObjects,
 } from "../../chain/genesis-objects";
 import { LoadingIndicator } from "../../components/loading-indicator";
+import { formatDate } from "../../i18n/format";
 import { SiteTopbar } from "../../i18n/site-topbar";
 import { type MembershipPassData, readMembershipPass } from "../../mypage/membership-pass-read";
+import { buildDisasterPoolViews } from "../../pools/disaster-pool-view-model";
 import { MEMBERSHIP_TERMS_VERSION } from "../../register/terms-version";
 import type { SonariLocale } from "../../register/wizard/locale";
 import { dAppKit } from "../../wallet/dapp-kit";
-import { WalletConnect } from "../../wallet/wallet-connect";
 import { readWalletNetwork } from "../../wallet/wallet-network";
 import { executeWalletTransaction } from "../../wallet/wallet-transaction-adapter";
+import { affectedAreaArtifactFromBaseUrl } from "../affected-area/affected-area-artifact";
 import { AffectedAreaMap } from "../affected-area/affected-area-map";
-import {
-    resolvePreviewAffectedAreaArtifact,
-    resolvePreviewCellSource,
-} from "../affected-area/preview-cell-source";
 import {
     type AffectedCellsProof,
     assertProofMatchesClaimContext,
@@ -42,7 +41,6 @@ import {
     type ClaimTransactionObjectConfig,
     fetchAffectedCellsProof,
 } from "../affected-cells-proof";
-import { claimCampaignToProgram } from "../catalog/claim-campaign-adapter";
 import {
     type ClaimCampaignState,
     type ClaimEligibility,
@@ -72,18 +70,8 @@ const WorldIdVerifyButton = dynamic(
     { ssr: false },
 );
 
-type CheckKey = "finalized" | "membership" | "residence" | "noPreviousClaim" | "poolBudget";
-
 const affectedProofWorkerUrl = process.env.NEXT_PUBLIC_SONARI_AFFECTED_PROOF_WORKER_URL ?? "";
 const signedStatementHash = computeIdentityStatementHash(MEMBERSHIP_TERMS_VERSION);
-
-const checkDefinitions: readonly { key: CheckKey; defaultStatus: "ready" | "pending" }[] = [
-    { key: "finalized", defaultStatus: "ready" },
-    { key: "membership", defaultStatus: "ready" },
-    { key: "residence", defaultStatus: "ready" },
-    { key: "noPreviousClaim", defaultStatus: "ready" },
-    { key: "poolBudget", defaultStatus: "pending" },
-];
 
 const claimPreviewItems: readonly { labelKey: string; value?: string; valueKey?: string }[] = [
     { labelKey: "estimatedRelief", value: "$280 USDC" },
@@ -181,6 +169,10 @@ export function ClaimDetailView({
         campaignState.status === "loading"
             ? null
             : selectCampaignById(campaignState.campaigns, campaignId);
+    const selectedPoolView =
+        selectedEvent === null
+            ? null
+            : (buildDisasterPoolViews([selectedEvent], Date.now())[0] ?? null);
 
     const isWalletConnected = account !== null;
     const membershipPass = passState.status === "ready" ? passState.pass : null;
@@ -201,6 +193,7 @@ export function ClaimDetailView({
     const isClaimInFlight = txState.status === "building" || txState.status === "submitting";
     const claimEligibility =
         eligibilityState.status === "ready" ? eligibilityState.eligibility : null;
+    const accountVerified = membershipPass?.identityVerified === true;
     const claimable = claimEligibility?.kind === "claimable";
     const proofRequired = claimable && claimEligibility.claimProofKind === "initial";
     const worldIdRequired = claimable && claimEligibility.requiresIdentity;
@@ -208,6 +201,7 @@ export function ClaimDetailView({
         proofReady: proofState.status === "ready",
         proofRequired,
         walletConnected: isWalletConnected,
+        accountVerified,
         txObjectsReady: txObjects !== null,
         worldIdReady: identityMaterial.kind === "ok",
         worldIdRequired,
@@ -265,13 +259,16 @@ export function ClaimDetailView({
         };
     }, [claimConfig, client, resetClaimProgress]);
 
-    // 地図プレビュー用の CellSource（被災セル証明とは別経路）。
-    // selectedEvent → DisasterClaimableProgram → resolvePreviewCellSource の流れ。
-    const previewProgram = selectedEvent !== null ? claimCampaignToProgram(selectedEvent) : null;
-    const previewCellSource =
-        previewProgram !== null ? resolvePreviewCellSource(previewProgram) : null;
-    const previewAffectedAreaArtifact =
-        previewProgram !== null ? resolvePreviewAffectedAreaArtifact(previewProgram) : null;
+    const affectedAreaArtifact =
+        selectedEvent === null
+            ? null
+            : affectedAreaArtifactFromBaseUrl(
+                  process.env.NEXT_PUBLIC_SONARI_AFFECTED_AREA_BASE_URL,
+                  {
+                      eventUid: selectedEvent.eventUid,
+                      eventRevision: selectedEvent.eventRevision,
+                  },
+              );
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: campaignReadNonce is a retry trigger.
     useEffect(() => {
@@ -434,6 +431,24 @@ export function ClaimDetailView({
         };
     }, [account, claimConfig, membershipPass, selectedEvent]);
 
+    // proof が必要な claim 経路では、居住セル proof を画面側で自動取得する。
+    // proofState.status はここでは再実行トリガーにしない。idle から checking にした瞬間に
+    // effect cleanup で取得処理をキャンセルしないため。
+    // biome-ignore lint/correctness/useExhaustiveDependencies: proofState.status is intentionally read without retriggering this effect.
+    useEffect(() => {
+        if (!proofRequired) {
+            if (proofState.status !== "idle") {
+                setProofState({ status: "idle" });
+            }
+            return;
+        }
+        if (selectedEvent === null || membershipPass === null || proofState.status !== "idle") {
+            return;
+        }
+
+        void handleCheckEligibility();
+    }, [proofRequired, selectedEvent, membershipPass]);
+
     // カタログのキー or 原文を、現在の locale で表示文字列へ解決する。
     const renderMessage = (message: ClaimMessage): string =>
         message.kind === "key" ? t(message.key) : message.text;
@@ -492,25 +507,6 @@ export function ClaimDetailView({
                 return t("tx.failed.detail");
         }
     };
-
-    const checks = checkDefinitions.map((definition) => {
-        // 居住セルのチェックだけは証明の結果に追従する。証明が未完了なら
-        // 証明メッセージを detail にしてステータスを pending にする。
-        if (definition.key === "residence" && proofState.status !== "ready") {
-            return {
-                key: definition.key,
-                label: t("checks.residence.label"),
-                detail: proofMessage(),
-                status: "pending" as const,
-            };
-        }
-        return {
-            key: definition.key,
-            label: t(`checks.${definition.key}.label`),
-            detail: t(`checks.${definition.key}.detail`),
-            status: definition.defaultStatus,
-        };
-    });
 
     async function handleCheckEligibility() {
         if (selectedEvent === null || membershipPass === null) {
@@ -656,186 +652,88 @@ export function ClaimDetailView({
         );
     }
 
+    const claimEndLabel =
+        selectedPoolView === null
+            ? formatClaimWindow(selectedEvent.claimEndMs)
+            : (formatDate(selectedPoolView.claimEndMs, locale) ??
+              formatClaimWindow(selectedEvent.claimEndMs));
+    const affectedCellCountLabel =
+        selectedPoolView?.affectedCellCount.toLocaleString() ?? selectedEvent.affectedCellCount;
+    const poolBalanceLabel = selectedPoolView?.balanceLabel ?? "-";
+
     return (
         <>
             <div className="watercolor-bg" />
             <div className="app">
                 <SiteTopbar active="claim" locale={locale} />
 
-                <main className="page claim-page">
-                    <header className="claim-hero">
+                <main className="page claim-page disaster-donate-page claim-detail-page">
+                    <header className="claim-hero disaster-hero">
                         <div>
-                            <div className="eyebrow">{t("hero.eyebrow")}</div>
-                            <h1>{t("hero.title")}</h1>
-                            <p className="muted claim-sub">{t("hero.sub")}</p>
-                        </div>
-                        <div className="claim-wallet-panel">
-                            <span className="tag tag-neutral">{t("hero.walletTag")}</span>
-                            <p>{t("hero.walletBody")}</p>
-                            <WalletConnect />
+                            <Link className="text-action disaster-breadcrumb" href="/claim">
+                                <span aria-hidden="true">‹</span>
+                                {t("event.viewEvents")}
+                            </Link>
+                            {selectedPoolView === null ? null : (
+                                <div
+                                    className={`disaster-status-badge${
+                                        selectedPoolView.status === "active" ? " is-active" : ""
+                                    }`}
+                                >
+                                    <span className="dot" aria-hidden="true" />
+                                    <span className="text">
+                                        {t(`detail.status.${selectedPoolView.status}`)}
+                                    </span>
+                                </div>
+                            )}
+                            <h1>{selectedEvent.title}</h1>
+                            <p className="muted">{selectedEvent.region}</p>
                         </div>
                     </header>
 
-                    {/* 選択キャンペーンの概要ヘッダ（ラジオ選択の代わり） */}
-                    <section className="claim-event-panel" aria-labelledby="campaign-summary-title">
-                        <div className="form-heading">
-                            <div>
-                                <div className="eyebrow">{t("event.eyebrow")}</div>
-                                <h2 id="campaign-summary-title">{selectedEvent.title}</h2>
-                            </div>
-                            <a className="text-action" href="/claim">
-                                {t("event.viewEvents")}
-                            </a>
-                        </div>
-                        {renderNotice(configNotice)}
-                        {renderNotice(campaignNotice, () =>
-                            setCampaignReadNonce((value) => value + 1),
-                        )}
-                        <dl className="pass-grid">
-                            <div>
-                                <dt>{t("detail.summaryRegion")}</dt>
-                                <dd>{selectedEvent.region}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("detail.summaryBand")}</dt>
-                                <dd>Band {selectedEvent.severityBand}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("detail.summaryAffectedCells")}</dt>
-                                <dd>{selectedEvent.affectedCellCount}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("detail.summaryDeadline")}</dt>
-                                <dd>{formatClaimWindow(selectedEvent.claimEndMs)}</dd>
-                            </div>
-                        </dl>
-                    </section>
+                    {renderNotice(configNotice)}
+                    {renderNotice(campaignNotice, () => setCampaignReadNonce((value) => value + 1))}
 
-                    {/* 被災エリア地図プレビュー（デモデータ・証明とは別経路） */}
-                    {previewCellSource !== null && previewAffectedAreaArtifact !== null ? (
-                        <section className="claim-map-section" aria-labelledby="map-section-title">
-                            <div className="panel-header">
-                                <div>
-                                    <h2 id="map-section-title">{t("detail.mapTitle")}</h2>
-                                </div>
-                                <span className="tag tag-neutral">
-                                    {t("detail.mapPreviewLabel")}
-                                </span>
-                            </div>
-                            <AffectedAreaMap
-                                affectedAreaArtifact={previewAffectedAreaArtifact}
-                                cellSource={previewCellSource}
-                                residenceCell={membershipPass?.homeCell ?? null}
-                            />
-                        </section>
-                    ) : null}
-
-                    <section className="claim-layout" aria-label={t("hero.eyebrow")}>
-                        <div className="claim-main">
-                            <section className="claim-pass-panel" aria-labelledby="pass-title">
-                                <div className="panel-header">
-                                    <div>
-                                        <div className="eyebrow">{t("pass.eyebrow")}</div>
-                                        <h2 id="pass-title">{t("pass.title")}</h2>
-                                    </div>
-                                    <span className="tag tag-ok tag-dot">
-                                        {membershipPass === null
-                                            ? t("checkStatus.pending")
-                                            : t("pass.statusActive")}
-                                    </span>
-                                </div>
-                                <dl className="pass-grid">
-                                    <div>
-                                        <dt>{t("pass.passId")}</dt>
-                                        <dd>
-                                            {membershipPass === null
-                                                ? "-"
-                                                : shortObjectId(membershipPass.objectId)}
-                                        </dd>
-                                    </div>
-                                    <div>
-                                        <dt>{t("pass.residenceCell")}</dt>
-                                        <dd>{membershipPass?.homeCell ?? "-"}</dd>
-                                    </div>
-                                    <div>
-                                        <dt>{t("pass.verification")}</dt>
-                                        <dd>
-                                            {membershipPass?.identityVerified === true
-                                                ? t("pass.verificationValid")
-                                                : t("checkStatus.pending")}
-                                        </dd>
-                                    </div>
-                                </dl>
-                                {renderNotice(passNotice, () =>
-                                    setPassReadNonce((value) => value + 1),
-                                )}
+                    <div className="disaster-split">
+                        <div className="disaster-split-main">
+                            <section
+                                className="metrics-strip disaster-metrics-strip"
+                                aria-label={selectedEvent.title}
+                            >
+                                <article className="metric-item">
+                                    <div className="label">{t("detail.summaryAffectedCells")}</div>
+                                    <div className="value">{affectedCellCountLabel}</div>
+                                </article>
+                                <article className="metric-item">
+                                    <div className="label">{t("detail.summaryDeadline")}</div>
+                                    <div className="value">{claimEndLabel}</div>
+                                </article>
+                                <article className="metric-item">
+                                    <div className="label">{t("detail.balanceLabel")}</div>
+                                    <div className="value">{poolBalanceLabel}</div>
+                                </article>
                             </section>
 
                             <section
-                                className="claim-check-panel"
-                                aria-labelledby="eligibility-title"
+                                className="claim-map-section"
+                                aria-labelledby="map-section-title"
                             >
                                 <div className="panel-header">
-                                    <div>
-                                        <div className="eyebrow">{t("eligibility.eyebrow")}</div>
-                                        <h2 id="eligibility-title">{t("eligibility.title")}</h2>
-                                    </div>
-                                    <button
-                                        className="btn btn-secondary"
-                                        disabled={
-                                            !proofRequired || proofState.status === "checking"
-                                        }
-                                        onClick={handleCheckEligibility}
-                                        type="button"
-                                    >
-                                        {t("eligibility.checkButton")}
-                                    </button>
+                                    <h2 id="map-section-title">{t("detail.mapTitle")}</h2>
                                 </div>
-                                {renderNotice(
-                                    eligibilityState.status === "failed"
-                                        ? {
-                                              key: "status.eligibilityFailed",
-                                              level: "error",
-                                              retryable: true,
-                                          }
-                                        : null,
-                                    () => setEligibilityReadNonce((value) => value + 1),
-                                )}
-                                <div className="check-list">
-                                    {checks.map((check) => (
-                                        <div className="check-row" key={check.key}>
-                                            <span
-                                                className={`check-indicator ${
-                                                    check.status === "ready" ? "ready" : "pending"
-                                                }`}
-                                            />
-                                            <div>
-                                                <strong>{check.label}</strong>
-                                                <small>{check.detail}</small>
-                                            </div>
-                                            <span className="tag tag-neutral">
-                                                {t(`checkStatus.${check.status}`)}
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                                <p className="muted claim-sub">{proofMessage()}</p>
-                                <fieldset className="control-group">
-                                    <legend>{t("worldId.title")}</legend>
-                                    <WorldIdVerifyButton
-                                        membershipId={membershipPass?.objectId ?? ""}
-                                        onVerified={setWorldIdResponse}
-                                        owner={account?.address ?? ""}
-                                        signedStatementHash={signedStatementHash}
-                                        statementsAccepted={true}
-                                        verified={worldIdResponse !== null}
+                                {affectedAreaArtifact !== null ? (
+                                    <AffectedAreaMap
+                                        affectedAreaArtifact={affectedAreaArtifact}
+                                        cellSource={{ kind: "deferred" }}
+                                        residenceCell={membershipPass?.homeCell ?? null}
                                     />
-                                    {renderNotice(worldIdNotice)}
-                                </fieldset>
+                                ) : (
+                                    <p className="muted claim-sub">{t("detail.mapUnavailable")}</p>
+                                )}
                             </section>
                         </div>
 
-                        <aside className="claim-side" aria-label={t("preview.eyebrow")}>
+                        <div className="disaster-split-aside claim-detail-aside">
                             <section className="claim-summary-panel">
                                 <div className="panel-header compact">
                                     <div>
@@ -855,6 +753,63 @@ export function ClaimDetailView({
                                         </div>
                                     ))}
                                 </div>
+                                {renderNotice(passNotice, () =>
+                                    setPassReadNonce((value) => value + 1),
+                                )}
+                                {renderNotice(
+                                    eligibilityState.status === "failed"
+                                        ? {
+                                              key: "status.eligibilityFailed",
+                                              level: "error",
+                                              retryable: true,
+                                          }
+                                        : null,
+                                    () => setEligibilityReadNonce((value) => value + 1),
+                                )}
+                                {membershipPass !== null && !accountVerified ? (
+                                    <div className="claim-inline-notice info" role="status">
+                                        <span>{t("status.accountUnverified")}</span>
+                                    </div>
+                                ) : null}
+                                {eligibilityState.status === "loading" ? (
+                                    <div className="claim-inline-notice info" role="status">
+                                        <span>{t("status.eligibilityLoading")}</span>
+                                    </div>
+                                ) : null}
+                                {eligibilityState.status === "ready" &&
+                                claimEligibility?.kind === "none" ? (
+                                    <div className="claim-inline-notice info" role="status">
+                                        <span>{t("status.notClaimable")}</span>
+                                    </div>
+                                ) : null}
+                                {proofRequired ? (
+                                    <div className="claim-inline-state">
+                                        <span>{proofMessage()}</span>
+                                        {proofState.status === "blocked" ? (
+                                            <button
+                                                className="text-action"
+                                                onClick={handleCheckEligibility}
+                                                type="button"
+                                            >
+                                                {t("status.retry")}
+                                            </button>
+                                        ) : null}
+                                    </div>
+                                ) : null}
+                                {worldIdRequired ? (
+                                    <fieldset className="control-group">
+                                        <legend>{t("worldId.title")}</legend>
+                                        <WorldIdVerifyButton
+                                            membershipId={membershipPass?.objectId ?? ""}
+                                            onVerified={setWorldIdResponse}
+                                            owner={account?.address ?? ""}
+                                            signedStatementHash={signedStatementHash}
+                                            statementsAccepted={true}
+                                            verified={worldIdResponse !== null}
+                                        />
+                                        {renderNotice(worldIdNotice)}
+                                    </fieldset>
+                                ) : null}
                                 <div className="claim-action-list">
                                     {claimActions.map((action) => (
                                         <button
@@ -870,15 +825,6 @@ export function ClaimDetailView({
                                         </button>
                                     ))}
                                 </div>
-                            </section>
-
-                            <section className="claim-note">
-                                <h3>{t("note.title")}</h3>
-                                <p>{t("note.body")}</p>
-                            </section>
-
-                            <section className="claim-result-panel">
-                                <div className="eyebrow">{t("result.eyebrow")}</div>
                                 <div className="result-placeholder">
                                     {resultView.loading ? (
                                         <LoadingIndicator label={txMessage()} />
@@ -903,8 +849,8 @@ export function ClaimDetailView({
                                     ) : null}
                                 </div>
                             </section>
-                        </aside>
-                    </section>
+                        </div>
+                    </div>
                 </main>
             </div>
         </>
@@ -924,10 +870,6 @@ function buildClaimTransactionObjects(
         identityRegistry: objects.identityRegistry,
         pass: pass.objectId,
     };
-}
-
-function shortObjectId(value: string): string {
-    return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
 }
 
 function formatClaimWindow(claimEndMs: string): string {

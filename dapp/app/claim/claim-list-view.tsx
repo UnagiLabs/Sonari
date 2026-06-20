@@ -19,7 +19,6 @@ import { useEffect, useMemo, useState } from "react";
 import { LoadingIndicator } from "../components/loading-indicator";
 import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
-import { WalletConnect } from "../wallet/wallet-connect";
 import { claimCampaignsToPrograms } from "./catalog/claim-campaign-adapter";
 import { buildClaimListCard, type ClaimListCardView } from "./catalog/claim-list-card";
 import { readClaimCampaigns } from "./claim-campaigns";
@@ -171,11 +170,6 @@ export function ClaimListView({ locale }: { readonly locale: SonariLocale }) {
                             <div className="eyebrow">{t("list.eyebrow")}</div>
                             <h1>{t("list.title")}</h1>
                             <p className="muted claim-sub">{t("list.sub")}</p>
-                        </div>
-                        <div className="claim-wallet-panel">
-                            <span className="tag tag-neutral">{t("hero.walletTag")}</span>
-                            <p>{t("hero.walletBody")}</p>
-                            <WalletConnect />
                         </div>
                     </header>
 

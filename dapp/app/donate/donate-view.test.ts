@@ -78,14 +78,15 @@ describe("/donate wallet section removal", () => {
         expect(globalsSource).not.toContain(".donate-wallet-panel");
     });
 
-    it("claim 側の Wallet panel は残す", () => {
-        expect(claimViewSource).toContain('className="claim-wallet-panel"');
-        expect(claimViewSource).toContain('t("hero.walletTag")');
-        expect(claimViewSource).toContain('t("hero.walletBody")');
-        expect(globalsSource).toContain(".claim-wallet-panel");
+    it("claim 一覧側にも本文側の Wallet panel を描画しない", () => {
+        expect(claimViewSource).not.toContain('className="claim-wallet-panel"');
+        expect(claimViewSource).not.toContain('t("hero.walletTag")');
+        expect(claimViewSource).not.toContain('t("hero.walletBody")');
+        expect(claimViewSource).not.toContain("../wallet/wallet-connect");
+        expect(globalsSource).not.toContain(".claim-wallet-panel");
     });
 
-    it("donate の不要な Wallet 文言だけを削除する", () => {
+    it("donate と claim 一覧が使わない Wallet 文言は detail 用として残す", () => {
         for (const locale of ["en", "ja"] as const) {
             const messages = readMessages(locale);
             const donateHero = heroMessages(messages, "donate");
