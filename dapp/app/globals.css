@@ -400,11 +400,18 @@ h4 {
   box-shadow: 0 0 0 3px oklch(0.68 0.10 150 / 0.18);
 }
 
+/* WalletConnect コンポーネント共通の器。全ページ（topbar / claim / welcome / mypage
+   など）が同じ <span class="wallet-connect"> を描画するため、dapp-kit ConnectButton の
+   配色はここでまとめてアプリの primary（.btn-primary と同じセージグリーン）に揃える。
+   ConnectButton が公開する --primary / --primary-foreground を host に継承させて上書き
+   する（アプリ側は --primary を定義していないので、ここが単一の指定箇所になる）。 */
 .wallet-connect {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  --primary: var(--sage-700);
+  --primary-foreground: var(--cream-50);
 }
 
 .wallet-network-badge {
@@ -3799,7 +3806,8 @@ h4 {
   }
 
   /* モバイルでは wallet 接続ボタンをヘッダー行に直接置く。NetworkBadge は行を圧迫する
-     ため隠し、ボタンは横並びで中央寄せにする。 */
+     ため隠し、ボタンは横並びで中央寄せにする。配色（セージグリーン）は共通の
+     .wallet-connect 側で指定しているため、ここではレイアウトだけ整える。 */
   .topbar-mobile-cluster .wallet-connect {
     flex-direction: row;
     align-items: center;
