@@ -27,7 +27,7 @@ const welcomeStepSource = readFileSync(
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const claimListViewSource = readFileSync(resolve(appDir, "claim/claim-list-view.tsx"), "utf8");
 const claimDetailViewSource = readFileSync(
-    resolve(appDir, "claim/[campaignId]/claim-detail-view.tsx"),
+    resolve(appDir, "claim/[eventId]/claim-detail-view.tsx"),
     "utf8",
 );
 const mypageViewSource = readFileSync(resolve(appDir, "mypage/mypage-view.tsx"), "utf8");

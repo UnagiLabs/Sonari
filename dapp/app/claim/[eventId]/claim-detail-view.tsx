@@ -6,7 +6,7 @@
 // 現行 claim-view.tsx（一覧ページ用）の請求フローを disasterEventId 駆動で移植。
 // 選択の置換:
 //   - 旧: selectedEventId state + ラジオ選択 UI
-//   - 新: URL の disasterEventId から selectCampaignById で1件を特定
+//   - 新: URL の disasterEventId から selectCampaignByEventId で1件を特定
 // 地図: AffectedAreaMap を affectedAreaArtifactFromBaseUrl 経由で表示する。
 //       地図データは請求の被災セル証明（fetchAffectedCellsProof）とは別経路。
 // ロジック: 引数・分岐・トランザクション構築は claim-view.tsx の意味を保つ。
@@ -58,7 +58,7 @@ import {
 } from "../claim-notices";
 import { createClaimReadClient } from "../claim-read-client";
 import { buildClaimResultView, type TxState } from "../claim-result";
-import { selectCampaignById } from "../select-campaign";
+import { selectCampaignByEventId } from "../select-campaign";
 
 const affectedProofWorkerUrl = process.env.NEXT_PUBLIC_SONARI_AFFECTED_PROOF_WORKER_URL ?? "";
 
@@ -106,10 +106,10 @@ const ELIGIBILITY_REFRESH_INTERVAL_MS = 30_000;
 
 export function ClaimDetailView({
     locale,
-    campaignId,
+    eventId,
 }: {
     readonly locale: SonariLocale;
-    readonly campaignId: string;
+    readonly eventId: string;
 }) {
     const t = useTranslations("claim");
     const account = useCurrentAccount();
@@ -148,11 +148,11 @@ export function ClaimDetailView({
     const network = readWalletNetwork();
     const resultView = buildClaimResultView(txState, network);
 
-    // URL の disasterEventId から1件を特定する（既存 campaignId URL も fallback で許容）。
+    // URL の disasterEventId から1件を特定する。
     const selectedEvent =
         campaignState.status === "loading"
             ? null
-            : selectCampaignById(campaignState.campaigns, campaignId);
+            : selectCampaignByEventId(campaignState.campaigns, eventId);
     const selectedPoolView =
         selectedEvent === null
             ? null
@@ -569,7 +569,7 @@ export function ClaimDetailView({
         );
     }
 
-    // 取得完了かつ campaignId 不一致（not found）
+    // 取得完了かつ disasterEventId 不一致（not found）
     if (selectedEvent === null) {
         return (
             <>

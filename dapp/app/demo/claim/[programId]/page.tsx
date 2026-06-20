@@ -10,7 +10,7 @@ import {
 } from "../../../register/wizard/locale";
 import { DemoClaimDetailView } from "./demo-claim-detail-view";
 
-// デモ用詳細ページは検索エンジンに載せない。本番 /claim/[campaignId] と URL が別なので
+// デモ用詳細ページは検索エンジンに載せない。本番 /claim/[eventId] と URL が別なので
 // canonical は設定せず、noindex にして本番ページの正規性を侵さない。
 export const metadata: Metadata = {
     title: "Demo · Claim Detail — Sonari",
