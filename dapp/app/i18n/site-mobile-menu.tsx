@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { buildMobileMenuItems } from "./mobile-menu-model";
 import type { NavKey, ResolvedNavItem } from "./topbar-nav";
 
@@ -5,17 +6,21 @@ import type { NavKey, ResolvedNavItem } from "./topbar-nav";
 // JS を増やさないよう <details>/<summary> ベースにし、クリック・キーボードでの
 // 開閉をブラウザ標準に任せる。文言は親（SiteTopbar）が next-intl で解決して渡すため、
 // この部品は翻訳に依存せず純粋に保つ。表示ロジックは mobile-menu-model に集約する。
+// extras は、モバイルではヘッダーから外す言語切替などをパネル末尾に寄せるための差込口。
+// 何を入れるかは親が決め、この部品はナビ項目の下に区切って描くだけにする。
 
 export function SiteMobileMenu({
     items,
     active,
     navLabels,
     menuLabel,
+    extras,
 }: {
     readonly items: readonly ResolvedNavItem[];
     readonly active: NavKey;
     readonly navLabels: Readonly<Record<NavKey, string>>;
     readonly menuLabel: string;
+    readonly extras?: ReactNode;
 }) {
     const menuItems = buildMobileMenuItems(items, active, navLabels);
 
@@ -30,6 +35,7 @@ export function SiteMobileMenu({
                         {item.label}
                     </a>
                 ))}
+                {extras !== undefined ? <div className="nav-menu-extras">{extras}</div> : null}
             </nav>
         </details>
     );
