@@ -402,16 +402,47 @@ h4 {
 
 /* WalletConnect コンポーネント共通の器。全ページ（topbar / claim / welcome / mypage
    など）が同じ <span class="wallet-connect"> を描画するため、dapp-kit ConnectButton の
-   配色はここでまとめてアプリの primary（.btn-primary と同じセージグリーン）に揃える。
-   ConnectButton が公開する --primary / --primary-foreground を host に継承させて上書き
-   する（アプリ側は --primary を定義していないので、ここが単一の指定箇所になる）。 */
+   配色はここでまとめて指定する（アプリ側は --primary を定義していないので、ここが単一の
+   指定箇所になる）。
+   デザイン「Header - Wallet Final」のアウトライン版に合わせ、未接続ボタンも接続後の
+   アカウントチップも白背景＋濃緑文字にする。両状態とも内部は .button.primary（=
+   --primary / --primary-foreground を使用）なので、ここを揃えれば両方に効く。 */
 .wallet-connect {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  --primary: var(--sage-700);
-  --primary-foreground: var(--cream-50);
+  --primary: var(--surface);
+  --primary-foreground: oklch(0.3 0.035 150);
+}
+
+/* ボタン本体（web component の trigger part）をアウトラインのピルにする。接続前の
+   「Connect」ボタンも接続後のアカウントチップも exportparts="trigger" を出すため、
+   緑の枠・角丸・太字が両状態に効く。寸法は別途 ::part(trigger)（モバイル）で調整する。 */
+.wallet-connect mysten-dapp-kit-connect-button::part(trigger) {
+  border: 1.5px solid oklch(0.55 0.06 150);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* hover はデザインどおり、ごく薄い緑の地に。 */
+.wallet-connect mysten-dapp-kit-connect-button::part(trigger):hover {
+  background: oklch(0.96 0.02 145);
+}
+
+/* 未接続ボタンの slot 中身（ウォレットアイコン + ラベル）。slot 内は light DOM なので
+   ここで直接整える。slotted の色継承はブラウザ差があるため、デザインの濃緑を明示指定し、
+   アイコン（stroke=currentColor）もその色を継ぐようにする。 */
+.wallet-connect-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: oklch(0.3 0.035 150);
+}
+
+.wallet-connect-icon {
+  flex: none;
 }
 
 .wallet-network-badge {
@@ -422,18 +453,19 @@ h4 {
   white-space: nowrap;
 }
 
-/* SSR の静的 HTML とチャンク読み込み中に表示する接続ボタンの placeholder。 */
+/* SSR の静的 HTML とチャンク読み込み中に表示する接続ボタンの placeholder。
+   読み込み後の本物ボタン（緑アウトライン）と見た目が揃うよう、同じ枠色・文字色にする。 */
 .wallet-connect-fallback {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  border: 1px solid var(--line-strong);
+  padding: 8px 16px;
+  border: 1.5px solid oklch(0.55 0.06 150);
   border-radius: 999px;
   background: var(--surface);
-  color: var(--ink-muted);
-  font-size: 13px;
-  font-weight: 500;
+  color: oklch(0.3 0.035 150);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .page {
