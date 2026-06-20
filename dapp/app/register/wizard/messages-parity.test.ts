@@ -340,19 +340,13 @@ describe("messages catalog parity", () => {
         }
     });
 
-    it("register、claim、mypage は WalletConnect を直接描画する", () => {
+    it("register、claim detail、mypage は WalletConnect を直接描画する", () => {
         const sources = [
             {
                 name: "register welcome",
                 source: welcomeStepSource,
                 importPath: "../../../wallet/wallet-connect",
                 requiresAccountRead: true,
-            },
-            {
-                name: "claim list",
-                source: claimListViewSource,
-                importPath: "../wallet/wallet-connect",
-                requiresAccountRead: false,
             },
             {
                 name: "claim detail",
@@ -377,5 +371,15 @@ describe("messages catalog parity", () => {
                 expect(source, name).toContain("useCurrentAccount()");
             }
         }
+    });
+
+    it("claim list は WalletConnect を直接描画しない", () => {
+        expect(claimListViewSource).not.toContain(
+            'import { WalletConnect } from "../wallet/wallet-connect";',
+        );
+        expect(claimListViewSource).not.toContain("<WalletConnect />");
+        expect(claimListViewSource).not.toContain("claim-wallet-panel");
+        expect(claimListViewSource).not.toContain("login-entry-point");
+        expect(claimListViewSource).not.toContain("<LoginEntryPoint");
     });
 });
