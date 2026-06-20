@@ -27,7 +27,7 @@ const welcomeStepSource = readFileSync(
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const claimListViewSource = readFileSync(resolve(appDir, "claim/claim-list-view.tsx"), "utf8");
 const claimDetailViewSource = readFileSync(
-    resolve(appDir, "claim/[campaignId]/claim-detail-view.tsx"),
+    resolve(appDir, "claim/[eventId]/claim-detail-view.tsx"),
     "utf8",
 );
 const mypageViewSource = readFileSync(resolve(appDir, "mypage/mypage-view.tsx"), "utf8");
@@ -391,6 +391,7 @@ describe("messages catalog parity", () => {
     it("claim detail の地図は demo preview 経路ではなく affected-area artifact を使う", () => {
         expect(claimDetailViewSource).toContain("affectedAreaArtifactFromBaseUrl");
         expect(claimDetailViewSource).toContain('cellSource={{ kind: "deferred" }}');
+        expect(claimDetailViewSource).toContain("residenceCell={null}");
         expect(claimDetailViewSource).not.toContain("resolvePreviewCellSource");
         expect(claimDetailViewSource).not.toContain("resolvePreviewAffectedAreaArtifact");
         expect(claimDetailViewSource).not.toContain("mapPreviewLabel");
@@ -398,7 +399,7 @@ describe("messages catalog parity", () => {
 
     it("claim detail の右カラムは claim カードだけを描画する", () => {
         expect(claimDetailViewSource).toContain("claim-summary-panel");
-        expect(claimDetailViewSource).toContain("WorldIdVerifyButton");
+        expect(claimDetailViewSource).not.toContain("WorldIdVerifyButton");
         expect(claimDetailViewSource).not.toContain('className="claim-pass-panel"');
         expect(claimDetailViewSource).not.toContain('className="claim-check-panel"');
         expect(claimDetailViewSource).not.toContain('className="claim-note"');

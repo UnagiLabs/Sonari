@@ -4,7 +4,7 @@
 // ClaimListView – /claim 一覧ビュー
 //
 // チェーンから読んだ DisasterCampaign を全件カード表示し、各カードから
-// /claim/<campaignId> 詳細へ遷移する。
+// /claim/<disasterEventId> 詳細へ遷移する。
 //
 // 設計方針:
 // - ウォレット接続（account）に依存しない。未接続でも全件見える。

@@ -8,7 +8,7 @@ import { parseLocale, SONARI_LOCALE_COOKIE, type SonariLocale } from "../../regi
 import { DisasterDonateView } from "./disaster-donate-view";
 
 // locale ごとの翻訳カタログ。cookie ベース切替のため /donate/[eventId] も
-// dynamic rendering になる（/donate・/claim/[campaignId] と同じ挙動）。
+// dynamic rendering になる（/donate・/claim/[eventId] と同じ挙動）。
 const messagesByLocale: Record<SonariLocale, typeof enMessages> = {
     en: enMessages,
     ja: jaMessages,

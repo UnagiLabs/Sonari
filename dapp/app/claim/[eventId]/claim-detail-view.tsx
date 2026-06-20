@@ -1,20 +1,18 @@
 "use client";
 
 // ---------------------------------------------------------------------------
-// ClaimDetailView – /claim/[campaignId] 詳細ビュー
+// ClaimDetailView – /claim/[eventId] 詳細ビュー
 //
-// 現行 claim-view.tsx（一覧ページ用）の請求フローを campaignId 駆動で移植。
+// 現行 claim-view.tsx（一覧ページ用）の請求フローを disasterEventId 駆動で移植。
 // 選択の置換:
 //   - 旧: selectedEventId state + ラジオ選択 UI
-//   - 新: URL の campaignId から selectCampaignById で1件を特定
+//   - 新: URL の disasterEventId から selectCampaignByEventId で1件を特定
 // 地図: AffectedAreaMap を affectedAreaArtifactFromBaseUrl 経由で表示する。
 //       地図データは請求の被災セル証明（fetchAffectedCellsProof）とは別経路。
 // ロジック: 引数・分岐・トランザクション構築は claim-view.tsx の意味を保つ。
 // ---------------------------------------------------------------------------
 
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
-import { computeIdentityStatementHash } from "@sonari/proof-core";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -27,7 +25,6 @@ import { formatDate } from "../../i18n/format";
 import { SiteTopbar } from "../../i18n/site-topbar";
 import { type MembershipPassData, readMembershipPass } from "../../mypage/membership-pass-read";
 import { buildDisasterPoolViews } from "../../pools/disaster-pool-view-model";
-import { MEMBERSHIP_TERMS_VERSION } from "../../register/terms-version";
 import type { SonariLocale } from "../../register/wizard/locale";
 import { dAppKit } from "../../wallet/dapp-kit";
 import { readWalletNetwork } from "../../wallet/wallet-network";
@@ -38,9 +35,12 @@ import {
     type AffectedCellsProof,
     assertProofMatchesClaimContext,
     buildClaimTransaction,
+    ClaimProofError,
+    type ClaimProofErrorCode,
     type ClaimTransactionObjectConfig,
     fetchAffectedCellsProof,
 } from "../affected-cells-proof";
+import { bandAmount, parseCellBand } from "../catalog/cell-band-rules";
 import {
     type ClaimCampaignState,
     type ClaimEligibility,
@@ -49,42 +49,28 @@ import {
 } from "../claim-campaigns";
 import { readClaimConfig } from "../claim-config";
 import { buildClaimFlowActions, type ClaimFlowAction } from "../claim-flow";
-import { resolveWorldIdClaimIdentity } from "../claim-identity";
 import { type ClaimMessage, resolveClaimProofError, resolveClaimTxError } from "../claim-messages";
 import {
     buildCampaignNotice,
     buildConfigNotice,
     buildPassNotice,
-    buildWorldIdNotice,
     type ClaimNotice,
 } from "../claim-notices";
 import { createClaimReadClient } from "../claim-read-client";
 import { buildClaimResultView, type TxState } from "../claim-result";
-import { selectCampaignById } from "../select-campaign";
-
-const WorldIdVerifyButton = dynamic(
-    () =>
-        import("../../register/identity/world-id-verify-button").then(
-            (module) => module.WorldIdVerifyButton,
-        ),
-    { ssr: false },
-);
+import { selectCampaignByEventId } from "../select-campaign";
 
 const affectedProofWorkerUrl = process.env.NEXT_PUBLIC_SONARI_AFFECTED_PROOF_WORKER_URL ?? "";
-const signedStatementHash = computeIdentityStatementHash(MEMBERSHIP_TERMS_VERSION);
-
-const claimPreviewItems: readonly { labelKey: string; value?: string; valueKey?: string }[] = [
-    { labelKey: "estimatedRelief", value: "$280 USDC" },
-    { labelKey: "poolSource", value: "Earthquake Relief Pool" },
-    { labelKey: "campaign", value: "USGS Earthquake Relief" },
-    { labelKey: "receipt", valueKey: "receiptValue" },
-];
 
 type ProofState =
     | { readonly status: "idle" }
     | { readonly status: "checking" }
     | { readonly status: "ready"; readonly proof: AffectedCellsProof }
-    | { readonly status: "blocked"; readonly message: ClaimMessage };
+    | {
+          readonly status: "blocked";
+          readonly message: ClaimMessage;
+          readonly code: ClaimProofErrorCode | null;
+      };
 
 type PassState =
     | { readonly status: "idle" }
@@ -120,10 +106,10 @@ const ELIGIBILITY_REFRESH_INTERVAL_MS = 30_000;
 
 export function ClaimDetailView({
     locale,
-    campaignId,
+    eventId,
 }: {
     readonly locale: SonariLocale;
-    readonly campaignId: string;
+    readonly eventId: string;
 }) {
     const t = useTranslations("claim");
     const account = useCurrentAccount();
@@ -138,7 +124,6 @@ export function ClaimDetailView({
     const [txState, setTxState] = useState<TxState>({ status: "idle" });
     const [txAction, setTxAction] = useState<ClaimFlowAction | null>(null);
     const [passState, setPassState] = useState<PassState>({ status: "idle" });
-    const [worldIdResponse, setWorldIdResponse] = useState<Record<string, unknown> | null>(null);
     const [campaignReadNonce, setCampaignReadNonce] = useState(0);
     const [passReadNonce, setPassReadNonce] = useState(0);
     const [eligibilityReadNonce, setEligibilityReadNonce] = useState(0);
@@ -157,18 +142,17 @@ export function ClaimDetailView({
         setProofState({ status: "idle" });
         setTxState({ status: "idle" });
         setTxAction(null);
-        setWorldIdResponse(null);
         setEligibilityState({ status: "idle" });
     }, []);
 
     const network = readWalletNetwork();
     const resultView = buildClaimResultView(txState, network);
 
-    // URL の campaignId から1件を特定する（ラジオ選択は不要）。
+    // URL の disasterEventId から1件を特定する。
     const selectedEvent =
         campaignState.status === "loading"
             ? null
-            : selectCampaignById(campaignState.campaigns, campaignId);
+            : selectCampaignByEventId(campaignState.campaigns, eventId);
     const selectedPoolView =
         selectedEvent === null
             ? null
@@ -178,14 +162,6 @@ export function ClaimDetailView({
     const membershipPass = passState.status === "ready" ? passState.pass : null;
     const genesisObjects =
         genesisObjectsState.status === "ready" ? genesisObjectsState.objects : null;
-    const identityMaterial =
-        claimConfig === null
-            ? { kind: "missing" as const, reason: "world_id_config" as const }
-            : resolveWorldIdClaimIdentity({
-                  rpId: claimConfig.worldIdRpId,
-                  action: claimConfig.worldIdAction,
-                  idkitResponse: worldIdResponse,
-              });
     const txObjects =
         genesisObjects !== null && membershipPass !== null && selectedEvent !== null
             ? buildClaimTransactionObjects(genesisObjects, membershipPass, selectedEvent)
@@ -195,16 +171,11 @@ export function ClaimDetailView({
         eligibilityState.status === "ready" ? eligibilityState.eligibility : null;
     const accountVerified = membershipPass?.identityVerified === true;
     const claimable = claimEligibility?.kind === "claimable";
-    const proofRequired = claimable && claimEligibility.claimProofKind === "initial";
-    const worldIdRequired = claimable && claimEligibility.requiresIdentity;
     const claimActions = buildClaimFlowActions({
         proofReady: proofState.status === "ready",
-        proofRequired,
         walletConnected: isWalletConnected,
         accountVerified,
         txObjectsReady: txObjects !== null,
-        worldIdReady: identityMaterial.kind === "ok",
-        worldIdRequired,
         claimable,
         inFlight: isClaimInFlight,
     });
@@ -217,9 +188,6 @@ export function ClaimDetailView({
         walletConnected: isWalletConnected,
         status: passState.status,
     });
-    const worldIdNotice = buildWorldIdNotice(
-        worldIdRequired && identityMaterial.kind === "missing" ? identityMaterial.reason : null,
-    );
 
     useEffect(() => {
         resetClaimProgress();
@@ -431,23 +399,17 @@ export function ClaimDetailView({
         };
     }, [account, claimConfig, membershipPass, selectedEvent]);
 
-    // proof が必要な claim 経路では、居住セル proof を画面側で自動取得する。
+    // 居住セルが被災セルに含まれるかを画面側で自動取得する。
     // proofState.status はここでは再実行トリガーにしない。idle から checking にした瞬間に
     // effect cleanup で取得処理をキャンセルしないため。
     // biome-ignore lint/correctness/useExhaustiveDependencies: proofState.status is intentionally read without retriggering this effect.
     useEffect(() => {
-        if (!proofRequired) {
-            if (proofState.status !== "idle") {
-                setProofState({ status: "idle" });
-            }
-            return;
-        }
         if (selectedEvent === null || membershipPass === null || proofState.status !== "idle") {
             return;
         }
 
         void handleCheckEligibility();
-    }, [proofRequired, selectedEvent, membershipPass]);
+    }, [selectedEvent, membershipPass]);
 
     // カタログのキー or 原文を、現在の locale で表示文字列へ解決する。
     const renderMessage = (message: ClaimMessage): string =>
@@ -464,19 +426,6 @@ export function ClaimDetailView({
                 ) : null}
             </div>
         );
-
-    const proofMessage = (): string => {
-        switch (proofState.status) {
-            case "idle":
-                return t("proof.idle");
-            case "checking":
-                return t("proof.checking");
-            case "ready":
-                return t("proof.ready");
-            case "blocked":
-                return renderMessage(proofState.message);
-        }
-    };
 
     const txMessage = (): string => {
         switch (txState.status) {
@@ -512,10 +461,6 @@ export function ClaimDetailView({
         if (selectedEvent === null || membershipPass === null) {
             return;
         }
-        if (!proofRequired) {
-            setProofState({ status: "idle" });
-            return;
-        }
 
         setProofState({ status: "checking" });
         setTxState({ status: "idle" });
@@ -535,7 +480,11 @@ export function ClaimDetailView({
             });
             setProofState({ status: "ready", proof });
         } catch (error) {
-            setProofState({ status: "blocked", message: resolveClaimProofError(error) });
+            setProofState({
+                status: "blocked",
+                message: resolveClaimProofError(error),
+                code: error instanceof ClaimProofError ? error.code : null,
+            });
         }
     }
 
@@ -564,13 +513,6 @@ export function ClaimDetailView({
             });
             return;
         }
-        if (claimEligibility.requiresIdentity && identityMaterial.kind !== "ok") {
-            setTxState({
-                status: "failed",
-                message: { kind: "key", key: "tx.failed.generic" },
-            });
-            return;
-        }
 
         setTxState({ status: "building" });
         setTxAction(action);
@@ -579,12 +521,8 @@ export function ClaimDetailView({
                 senderAddress: account.address,
                 packageId: claimConfig.packageId,
                 objects: txObjects,
-                identityProvider:
-                    identityMaterial.kind === "ok" ? identityMaterial.identityProvider : 0,
-                duplicateKeyHash:
-                    identityMaterial.kind === "ok"
-                        ? identityMaterial.duplicateKeyHash
-                        : EMPTY_DUPLICATE_KEY_HASH,
+                identityProvider: 0,
+                duplicateKeyHash: EMPTY_DUPLICATE_KEY_HASH,
                 claimProof:
                     claimEligibility.claimProofKind === "initial"
                         ? (() => {
@@ -631,7 +569,7 @@ export function ClaimDetailView({
         );
     }
 
-    // 取得完了かつ campaignId 不一致（not found）
+    // 取得完了かつ disasterEventId 不一致（not found）
     if (selectedEvent === null) {
         return (
             <>
@@ -660,6 +598,19 @@ export function ClaimDetailView({
     const affectedCellCountLabel =
         selectedPoolView?.affectedCellCount.toLocaleString() ?? selectedEvent.affectedCellCount;
     const poolBalanceLabel = selectedPoolView?.balanceLabel ?? "-";
+    const estimatedReliefLabel =
+        proofState.status === "ready"
+            ? (() => {
+                  const band = parseCellBand(proofState.proof.leaf.cell_band);
+                  return band === null
+                      ? t("preview.unavailable")
+                      : t("preview.amount", { amount: bandAmount(band) });
+              })()
+            : proofState.status === "blocked" && proofState.code === "outside_affected_area"
+              ? t("preview.outsideArea")
+              : proofState.status === "checking"
+                ? t("preview.checking")
+                : t("preview.unavailable");
 
     return (
         <>
@@ -725,7 +676,7 @@ export function ClaimDetailView({
                                     <AffectedAreaMap
                                         affectedAreaArtifact={affectedAreaArtifact}
                                         cellSource={{ kind: "deferred" }}
-                                        residenceCell={membershipPass?.homeCell ?? null}
+                                        residenceCell={null}
                                     />
                                 ) : (
                                     <p className="muted claim-sub">{t("detail.mapUnavailable")}</p>
@@ -742,16 +693,10 @@ export function ClaimDetailView({
                                     </div>
                                 </div>
                                 <div className="claim-preview-list">
-                                    {claimPreviewItems.map((item) => (
-                                        <div className="claim-preview-row" key={item.labelKey}>
-                                            <span>{t(`preview.${item.labelKey}`)}</span>
-                                            <strong>
-                                                {item.valueKey
-                                                    ? t(`preview.${item.valueKey}`)
-                                                    : item.value}
-                                            </strong>
-                                        </div>
-                                    ))}
+                                    <div className="claim-preview-row">
+                                        <span>{t("preview.estimatedRelief")}</span>
+                                        <strong>{estimatedReliefLabel}</strong>
+                                    </div>
                                 </div>
                                 {renderNotice(passNotice, () =>
                                     setPassReadNonce((value) => value + 1),
@@ -782,34 +727,6 @@ export function ClaimDetailView({
                                         <span>{t("status.notClaimable")}</span>
                                     </div>
                                 ) : null}
-                                {proofRequired ? (
-                                    <div className="claim-inline-state">
-                                        <span>{proofMessage()}</span>
-                                        {proofState.status === "blocked" ? (
-                                            <button
-                                                className="text-action"
-                                                onClick={handleCheckEligibility}
-                                                type="button"
-                                            >
-                                                {t("status.retry")}
-                                            </button>
-                                        ) : null}
-                                    </div>
-                                ) : null}
-                                {worldIdRequired ? (
-                                    <fieldset className="control-group">
-                                        <legend>{t("worldId.title")}</legend>
-                                        <WorldIdVerifyButton
-                                            membershipId={membershipPass?.objectId ?? ""}
-                                            onVerified={setWorldIdResponse}
-                                            owner={account?.address ?? ""}
-                                            signedStatementHash={signedStatementHash}
-                                            statementsAccepted={true}
-                                            verified={worldIdResponse !== null}
-                                        />
-                                        {renderNotice(worldIdNotice)}
-                                    </fieldset>
-                                ) : null}
                                 <div className="claim-action-list">
                                     {claimActions.map((action) => (
                                         <button
@@ -825,29 +742,31 @@ export function ClaimDetailView({
                                         </button>
                                     ))}
                                 </div>
-                                <div className="result-placeholder">
-                                    {resultView.loading ? (
-                                        <LoadingIndicator label={txMessage()} />
-                                    ) : (
-                                        <strong>{txMessage()}</strong>
-                                    )}
-                                    <small>{txDetail()}</small>
-                                    {resultView.explorerUrl !== null ? (
-                                        <a
-                                            className="text-action"
-                                            href={resultView.explorerUrl}
-                                            rel="noopener noreferrer"
-                                            target="_blank"
-                                        >
-                                            {t("tx.submitted.explorerLink")}
-                                        </a>
-                                    ) : null}
-                                    {resultView.showDashboardCta ? (
-                                        <a className="btn btn-secondary" href="/mypage">
-                                            {t("tx.submitted.cta")}
-                                        </a>
-                                    ) : null}
-                                </div>
+                                {txState.status !== "idle" ? (
+                                    <div className="result-placeholder">
+                                        {resultView.loading ? (
+                                            <LoadingIndicator label={txMessage()} />
+                                        ) : (
+                                            <strong>{txMessage()}</strong>
+                                        )}
+                                        <small>{txDetail()}</small>
+                                        {resultView.explorerUrl !== null ? (
+                                            <a
+                                                className="text-action"
+                                                href={resultView.explorerUrl}
+                                                rel="noopener noreferrer"
+                                                target="_blank"
+                                            >
+                                                {t("tx.submitted.explorerLink")}
+                                            </a>
+                                        ) : null}
+                                        {resultView.showDashboardCta ? (
+                                            <a className="btn btn-secondary" href="/mypage">
+                                                {t("tx.submitted.cta")}
+                                            </a>
+                                        ) : null}
+                                    </div>
+                                ) : null}
                             </section>
                         </div>
                     </div>

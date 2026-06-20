@@ -2,12 +2,9 @@ export type ClaimFlowAction = "claim";
 
 export interface ClaimFlowInput {
     readonly proofReady: boolean;
-    readonly proofRequired: boolean;
     readonly walletConnected: boolean;
     readonly accountVerified: boolean;
     readonly txObjectsReady: boolean;
-    readonly worldIdReady: boolean;
-    readonly worldIdRequired: boolean;
     readonly claimable: boolean;
     readonly inFlight: boolean;
 }
@@ -43,10 +40,6 @@ export function isClaimFlowActionDisabled(
 
     switch (action) {
         case "claim":
-            return (
-                !input.claimable ||
-                (input.proofRequired && !input.proofReady) ||
-                (input.worldIdRequired && !input.worldIdReady)
-            );
+            return !input.claimable || !input.proofReady;
     }
 }

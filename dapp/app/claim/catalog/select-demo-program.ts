@@ -8,7 +8,7 @@ import type { ClaimableProgram } from "./claimable-program";
  * - 返り値は ClaimableProgram 全体（category / detailHref 等
  *   詳細ページルーティングで必要なフィールドを保持）。
  *
- * @see selectCampaignById 同じ流儀の本番キャンペーン版
+ * @see selectCampaignByEventId 同じ流儀の本番キャンペーン版
  */
 export function selectDemoProgramById(
     programs: readonly ClaimableProgram[],

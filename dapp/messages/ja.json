@@ -942,10 +942,10 @@
             "eyebrow": "プレビュー",
             "title": "申請の見積もり",
             "estimatedRelief": "見積もり救援金",
-            "poolSource": "プールの出所",
-            "campaign": "キャンペーン",
-            "receipt": "レシート",
-            "receiptValue": "公開・受給者の参照は匿名化されます"
+            "amount": "{amount} USDC",
+            "outsideArea": "対象外",
+            "checking": "確認中",
+            "unavailable": "-"
         },
         "affectedAreaMap": {
             "ariaLabel": "被災エリアの地図",
