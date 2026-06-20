@@ -1,11 +1,5 @@
 .codex/
-!.codex/
-.codex/*
-!.codex/config.toml
-!.codex/hooks.json
-!.codex/agents/
-.codex/agents/*
-!.codex/agents/commit-worker.toml
+.claude/
 .cache/
 .build/
 node_modules/
@@ -42,6 +36,3 @@ dapp/public/demo/**/*.br
 dapp/public/demo/**/*.gz
 dapp/public/demo/**/*.tmp
 dapp/public/demo/**/*.tmp.*
-
-# gh-issue-implement の worktree は transient なので追跡しない。
-.claude/worktrees/
