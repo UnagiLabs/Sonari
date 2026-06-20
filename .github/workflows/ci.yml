@@ -55,7 +55,7 @@ env:
 jobs:
   check:
     name: pnpm and Cargo
-    runs-on: [self-hosted, linux, x64, manji]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
