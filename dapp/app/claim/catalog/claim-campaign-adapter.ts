@@ -48,12 +48,12 @@ function parseAffectedCellCount(value: string): number | null {
  * fail-closed で `null` を返す。
  *
  * フィールド対応:
- * - `id`               = `campaignId`
+ * - `id`               = `disasterEventId`
  * - `category`         = `"disaster"`（固定）
  * - `title`            = `title`
  * - `scope`            = `region`
  * - `deadlineMs`       = `claimEndMs`
- * - `detailHref`       = `/claim/<campaignId>`（本番詳細ルート）
+ * - `detailHref`       = `/claim/<disasterEventId>`（本番詳細ルート）
  * - `eventUid`         = `eventUid`（契約値・再検証なし）
  * - `severityBand`     = `parseCellBand(severityBand)`（無効なら null・fail-closed）
  * - `affectedCellCount`= `affectedCellCount`（u64 文字列 → number・非整数は null）
@@ -86,7 +86,7 @@ export function claimCampaignToProgram(
     );
 
     return {
-        id: state.campaignId,
+        id: state.disasterEventId,
         category: "disaster",
         title: state.title,
         scope: state.region,
@@ -98,7 +98,7 @@ export function claimCampaignToProgram(
             maxUsdc: bandAmount(severityBand),
         },
         deadlineMs: state.claimEndMs,
-        detailHref: `/claim/${state.campaignId}`,
+        detailHref: `/claim/${state.disasterEventId}`,
         eventUid: state.eventUid,
         eventRevision: state.eventRevision,
         severityBand,

@@ -7,14 +7,14 @@ import { canonicalMetadata } from "../../i18n/site-metadata";
 import { parseLocale, SONARI_LOCALE_COOKIE, type SonariLocale } from "../../register/wizard/locale";
 import { ClaimDetailView } from "./claim-detail-view";
 
-// locale ごとの翻訳カタログ。cookie ベース切替のため /claim/[campaignId] も
+// locale ごとの翻訳カタログ。cookie ベース切替のため /claim/[eventId] も
 // dynamic rendering になる（/claim と同じ挙動）。
 const messagesByLocale: Record<SonariLocale, typeof enMessages> = {
     en: enMessages,
     ja: jaMessages,
 };
 
-// 動的 canonical: campaignId ごとに正規 URL が異なるため generateMetadata で解決する。
+// 動的 canonical: URL id ごとに正規 URL が異なるため generateMetadata で解決する。
 export async function generateMetadata({
     params,
 }: {

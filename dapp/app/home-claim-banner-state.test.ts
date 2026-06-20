@@ -3,8 +3,8 @@ import type { ClaimCampaignState } from "./claim/claim-campaigns";
 import { selectClaimBannerCta } from "./home-claim-banner-state";
 
 // ClaimCampaignState は必須フィールドが多いため、テストで使う最小限の値を
-// 埋めるファクトリを用意する。判定に関わるのは campaignId と claimWindowOpen
-// だけなので、それ以外はダミー値で固定し、必要な値だけ上書きする。
+// 埋めるファクトリを用意する。判定に関わるのは campaignId / disasterEventId と
+// claimWindowOpen だけなので、それ以外はダミー値で固定し、必要な値だけ上書きする。
 function makeCampaign(overrides: Partial<ClaimCampaignState>): ClaimCampaignState {
     return {
         campaignId: "0x00000000000000000000000000000000000000000000000000000000000000c1",
@@ -79,13 +79,14 @@ describe("selectClaimBannerCta", () => {
         ).toBeNull();
     });
 
-    it("returns the campaignId when connected, registered, and a claim window is open", () => {
+    it("returns the disasterEventId when connected, registered, and a claim window is open", () => {
         const cta = selectClaimBannerCta({
             walletConnected: true,
             registered: true,
             campaigns: [openCampaign],
         });
         expect(cta).not.toBeNull();
+        expect(cta?.disasterEventId).toBe(openCampaign.disasterEventId);
         expect(cta?.campaignId).toBe(openCampaign.campaignId);
     });
 
@@ -96,6 +97,7 @@ describe("selectClaimBannerCta", () => {
         });
         const firstOpen = makeCampaign({
             campaignId: "0x00000000000000000000000000000000000000000000000000000000000000b3",
+            disasterEventId: "0x00000000000000000000000000000000000000000000000000000000000000d3",
             claimWindowOpen: true,
         });
         const secondOpen = makeCampaign({
@@ -107,15 +109,15 @@ describe("selectClaimBannerCta", () => {
             registered: true,
             campaigns: [closed, firstOpen, secondOpen],
         });
-        expect(cta?.campaignId).toBe(firstOpen.campaignId);
+        expect(cta?.disasterEventId).toBe(firstOpen.disasterEventId);
     });
 
-    it("returns a stable shape: { campaignId }", () => {
+    it("returns a stable shape: { disasterEventId, campaignId }", () => {
         const cta = selectClaimBannerCta({
             walletConnected: true,
             registered: true,
             campaigns: [openCampaign],
         });
-        expect(Object.keys(cta ?? {})).toStrictEqual(["campaignId"]);
+        expect(Object.keys(cta ?? {})).toStrictEqual(["disasterEventId", "campaignId"]);
     });
 });

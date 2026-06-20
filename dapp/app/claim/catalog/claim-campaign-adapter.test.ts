@@ -59,11 +59,11 @@ describe("claimCampaignToProgram: フィールド対応", () => {
         if (result === null) return;
 
         // 基本フィールド
-        expect(result.id).toBe(CAMPAIGN_ID);
+        expect(result.id).toBe(DISASTER_EVENT_ID);
         expect(result.title).toBe("Test Earthquake");
         expect(result.scope).toBe("Test Region");
         expect(result.deadlineMs).toBe("2000");
-        expect(result.detailHref).toBe(`/claim/${CAMPAIGN_ID}`);
+        expect(result.detailHref).toBe(`/claim/${DISASTER_EVENT_ID}`);
 
         // 災害固有フィールド
         expect(result.category).toBe("disaster");
@@ -136,9 +136,9 @@ describe("claimCampaignToProgram: cellSource と detailHref", () => {
         expect(result?.cellSource).toEqual({ kind: "deferred" });
     });
 
-    it("detailHref は /claim/<campaignId>", () => {
+    it("detailHref は /claim/<disasterEventId>", () => {
         const result = claimCampaignToProgram(makeState());
-        expect(result?.detailHref).toBe(`/claim/${CAMPAIGN_ID}`);
+        expect(result?.detailHref).toBe(`/claim/${DISASTER_EVENT_ID}`);
     });
 });
 

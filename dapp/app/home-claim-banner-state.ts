@@ -22,15 +22,17 @@ export interface ClaimBannerCtaInput {
     readonly campaigns: readonly ClaimCampaignState[];
 }
 
-/** 受け取り CTA の表示モデル。遷移先に使う campaignId を持つ。 */
+/** 受け取り CTA の表示モデル。遷移先に使う disasterEventId を持つ。 */
 export interface ClaimBannerCta {
-    /** 「受け取る」ボタンの遷移先 /claim?campaign=... に使うキャンペーン ID。 */
+    /** 「受け取る」ボタンの遷移先 /claim/<disasterEventId> に使う災害イベント ID。 */
+    readonly disasterEventId: string;
+    /** 対応する campaign ID。表示中バナーとの対応確認に使う。 */
     readonly campaignId: string;
 }
 
 /**
  * 受け取り CTA を出すかを決める。3 条件をすべて満たす場合は、claim window が開いて
- * いるキャンペーンを先頭から 1 つ選んでその campaignId を返す。満たさない場合は null
+ * いるキャンペーンを先頭から 1 つ選んでその disasterEventId を返す。満たさない場合は null
  * を返し、バナーに受け取りボタンを出さない（fail-close）。
  */
 export function selectClaimBannerCta(input: ClaimBannerCtaInput): ClaimBannerCta | null {
@@ -41,5 +43,5 @@ export function selectClaimBannerCta(input: ClaimBannerCtaInput): ClaimBannerCta
     if (claimable === undefined) {
         return null;
     }
-    return { campaignId: claimable.campaignId };
+    return { disasterEventId: claimable.disasterEventId, campaignId: claimable.campaignId };
 }

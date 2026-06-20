@@ -74,8 +74,10 @@ export function EmergencyBannerSection({ onDonate }: EmergencyBannerSectionProps
     // 現在時刻で実施中判定する。該当が無ければ null になりバナーは非表示。
     const campaign = selectEmergencyBannerFromClaimCampaigns(campaigns, BigInt(Date.now()));
     const primaryAction =
-        claimCta !== null
-            ? { href: `/claim?campaign=${claimCta.campaignId}`, label: t("emergencyClaimCta") }
+        claimCta !== null &&
+        campaign !== null &&
+        claimCta.disasterEventId === campaign.disasterEventId
+            ? { href: `/claim/${campaign.disasterEventId}`, label: t("emergencyClaimCta") }
             : undefined;
 
     return (
