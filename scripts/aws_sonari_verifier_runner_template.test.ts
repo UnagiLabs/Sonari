@@ -936,6 +936,38 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(timezoneUsageCount).toBe(1);
     });
 
+    it("reinvokes the earthquake watcher when an earthquake runner execution completes", async () => {
+        const template = await readTemplate();
+        const ruleStart = template.indexOf("EarthquakeRunnerCompletionWatcherRule:");
+        const permissionStart = template.indexOf("EarthquakeRunnerCompletionWatcherPermission:");
+        const batchScheduleStart = template.indexOf("BatchSchedule:", permissionStart);
+        const rule = template.slice(ruleStart, permissionStart);
+        const permission = template.slice(permissionStart, batchScheduleStart);
+
+        expect(ruleStart).toBeGreaterThan(-1);
+        expect(permissionStart).toBeGreaterThan(ruleStart);
+        expect(batchScheduleStart).toBeGreaterThan(permissionStart);
+        expect(rule).toContain("Type: AWS::Events::Rule");
+        expect(rule).toContain("- aws.states");
+        expect(rule).toContain("- Step Functions Execution Status Change");
+        expect(rule).toContain("stateMachineArn:");
+        expect(rule).toContain("- !Ref EarthquakeRunnerStateMachine");
+        for (const status of ["SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED"]) {
+            expect(rule).toContain(`- ${status}`);
+        }
+        expect(rule).toContain("Arn: !GetAtt WatcherLambda.Arn");
+        expect(rule).toContain(
+            'Input: \'{"verifier_kind":"earthquake","trigger":"earthquake_runner_completion"}\'',
+        );
+        expect(permission).toContain("Type: AWS::Lambda::Permission");
+        expect(permission).toContain("Action: lambda:InvokeFunction");
+        expect(permission).toContain("FunctionName: !Ref WatcherLambda");
+        expect(permission).toContain("Principal: events.amazonaws.com");
+        expect(permission).toContain(
+            "SourceArn: !GetAtt EarthquakeRunnerCompletionWatcherRule.Arn",
+        );
+    });
+
     it("delivers the World ID proof mode and Sui network to the membership enclave bootstrap", async () => {
         const template = await readTemplate();
 

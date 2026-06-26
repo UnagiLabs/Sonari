@@ -66,6 +66,18 @@ class FailingWorkflowStarter implements WorkflowStarter {
     }
 }
 
+class FailingOnceWorkflowStarter extends RecordingWorkflowStarter {
+    private hasFailed = false;
+
+    override async start(input: WorkflowStartRequest): Promise<void> {
+        if (!this.hasFailed) {
+            this.hasFailed = true;
+            throw new Error("Step Functions unavailable");
+        }
+        await super.start(input);
+    }
+}
+
 describe("AWS Lambda watcher handlers", () => {
     it("stores recent USGS candidates and starts workflows only for eligible due events", async () => {
         const repository = new InMemoryStateRepository();
@@ -1549,7 +1561,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         ]);
     });
 
-    it("starts at most one workflow for each scheduler invocation", async () => {
+    it("starts one successful workflow per invocation and relies on completion triggers for the next due row", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
         await repository.upsertManualEvent("us7000first", baseNow);
@@ -1565,7 +1577,51 @@ describe("DynamoDB-compatible repository behavior", () => {
                 attempt: 1,
             },
         ]);
+        await expect(repository.get("us7000first")).resolves.toMatchObject({
+            status: "processing",
+        });
         await expect(repository.get("us7000second")).resolves.toMatchObject({ status: "new" });
+    });
+
+    it("skips USGS scanning on runner completion triggers and starts the next due row", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const handler = createScheduledHandler({
+            repository,
+            workflow,
+            now: () => baseNow + 4_000,
+            fetchCandidates: async () => {
+                throw new Error("USGS scan should not run for runner completion triggers");
+            },
+            resolveSourceEventId: passthroughSourceEventIdResolver,
+        });
+        await repository.upsertManualEvent("us7000first", baseNow);
+        await repository.upsertManualEvent("us7000second", baseNow + 1);
+        await startDueWorkflows(repository, workflow, baseNow + 2_000, 25);
+        await repository.applyRunnerResult(
+            "us7000first",
+            pendingSourceResult("us7000first"),
+            baseNow + 2_500,
+            baseNow + HOUR_MS,
+            1,
+        );
+        await repository.markWorkflowStopped("us7000first", 1, baseNow + 3_000);
+
+        const result = await handler({ trigger: "earthquake_runner_completion" });
+
+        expect(result).toEqual({ scanned: 0, workflow_started: 1 });
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000first",
+                executionName: "earthquake-us7000first-r1-a1",
+                attempt: 1,
+            },
+            {
+                sourceEventId: "us7000second",
+                executionName: "earthquake-us7000second-r1-a1",
+                attempt: 1,
+            },
+        ]);
     });
 
     it("does not try a second due row when an exclusive workflow claim is already held", async () => {
@@ -1619,22 +1675,15 @@ describe("DynamoDB-compatible repository behavior", () => {
         ]);
     });
 
-    it("marks a workflow-start failure failed and releases the exclusive claim", async () => {
+    it("marks a workflow-start failure failed and continues with the next due row", async () => {
         const repository = new InMemoryStateRepository();
-        const workflow = new RecordingWorkflowStarter();
+        const workflow = new FailingOnceWorkflowStarter();
         await repository.upsertManualEvent("us7000first", baseNow);
         await repository.upsertManualEvent("us7000second", baseNow + 1);
 
-        const failedStart = await startDueWorkflows(
-            repository,
-            new FailingWorkflowStarter(),
-            baseNow + 2_000,
-            25,
-        );
-        const nextStart = await startDueWorkflows(repository, workflow, baseNow + 3_000, 25);
+        const started = await startDueWorkflows(repository, workflow, baseNow + 2_000, 25);
 
-        expect(failedStart).toBe(0);
-        expect(nextStart).toBe(1);
+        expect(started).toBe(1);
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000second",
