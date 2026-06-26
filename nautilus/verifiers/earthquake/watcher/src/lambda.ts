@@ -7,6 +7,7 @@ import {
     getLatestOnchainEventRevision,
     type ManualLambdaEvent,
     type OnchainEventRevisionReader,
+    type ScheduledLambdaEvent,
     StepFunctionsWorkflowStarter,
 } from "./index.js";
 
@@ -14,12 +15,12 @@ const sfn = new SFNClient({});
 const secrets = new SecretsManagerClient({});
 let cachedManualToken: string | undefined;
 
-export async function scheduledHandler(): Promise<unknown> {
+export async function scheduledHandler(event: ScheduledLambdaEvent = {}): Promise<unknown> {
     return createScheduledHandler({
         repository: new DynamoDbStateRepository(requiredEnv("EVENTS_TABLE_NAME")),
         workflow: new StepFunctionsWorkflowStarter(requiredEnv("RUNNER_STATE_MACHINE_ARN"), sfn),
         readLatestOnchainEventRevision: readLatestOnchainEventRevisionFromEnv(),
-    })();
+    })(event);
 }
 
 export async function manualHandler(event: ManualLambdaEvent): Promise<unknown> {

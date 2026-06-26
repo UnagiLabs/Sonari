@@ -1821,6 +1821,35 @@ Resources:
         RoleArn: !GetAtt WatcherScheduleRole.Arn
         Input: '{"verifier_kind": "earthquake"}'
 
+  EarthquakeRunnerCompletionWatcherRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.states
+        detail-type:
+          - Step Functions Execution Status Change
+        detail:
+          stateMachineArn:
+            - !Ref EarthquakeRunnerStateMachine
+          status:
+            - SUCCEEDED
+            - FAILED
+            - TIMED_OUT
+            - ABORTED
+      Targets:
+        - Arn: !GetAtt WatcherLambda.Arn
+          Id: EarthquakeRunnerCompletionWatcher
+          Input: '{"verifier_kind":"earthquake","trigger":"earthquake_runner_completion"}'
+
+  EarthquakeRunnerCompletionWatcherPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WatcherLambda
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EarthquakeRunnerCompletionWatcherRule.Arn
+
   BatchSchedule:
     Type: AWS::Scheduler::Schedule
     Properties:

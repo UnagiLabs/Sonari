@@ -152,13 +152,26 @@ export interface ScheduledHandlerResult {
     workflow_started: number;
 }
 
+export interface ScheduledLambdaEvent {
+    verifier_kind?: "earthquake";
+    trigger?: "earthquake_runner_completion";
+}
+
 export function createScheduledHandler(options: ScheduledHandlerOptions) {
-    return async function scheduledHandler(): Promise<ScheduledHandlerResult> {
+    return async function scheduledHandler(
+        event: ScheduledLambdaEvent = {},
+    ): Promise<ScheduledHandlerResult> {
         const nowMs = options.now?.() ?? Date.now();
-        const candidates = await (options.fetchCandidates ?? fetchUsgsRecentCandidates)();
-        await scanCandidates(options.repository, candidates, nowMs, {
-            resolveSourceEventId: options.resolveSourceEventId ?? defaultResolveUsgsSourceEventId,
-        });
+        const shouldScanCandidates = event.trigger !== "earthquake_runner_completion";
+        const candidates = shouldScanCandidates
+            ? await (options.fetchCandidates ?? fetchUsgsRecentCandidates)()
+            : [];
+        if (shouldScanCandidates) {
+            await scanCandidates(options.repository, candidates, nowMs, {
+                resolveSourceEventId:
+                    options.resolveSourceEventId ?? defaultResolveUsgsSourceEventId,
+            });
+        }
         const started = await startDueWorkflows(
             options.repository,
             options.workflow,
@@ -347,59 +360,79 @@ export async function startDueWorkflows(
     limit = DEFAULT_DUE_LIMIT,
     options: RunnerRevisionOptions = {},
 ): Promise<number> {
-    const staleBeforeMs = nowMs - PROCESSING_STALE_AFTER_MS;
-    if (await repository.hasActiveRunnerWorkflow(staleBeforeMs)) {
-        return 0;
-    }
-    await repository.recoverStaleProcessing(staleBeforeMs, nowMs, nowMs + FAILED_RETRY_BACKOFF_MS);
-    if (await repository.hasActiveRunnerWorkflow(staleBeforeMs)) {
-        return 0;
-    }
-    const rows = await repository.listDue(nowMs, limit);
     let started = 0;
-    for (const row of rows) {
-        if (row.finalization_deadline_at_ms <= nowMs && isPendingStatus(row.status)) {
-            await repository.markRejected(row.source_event_id, "REJECTED_AUTO_TRIGGER", nowMs);
-            continue;
+    let handled = 0;
+    while (handled < limit) {
+        const staleBeforeMs = nowMs - PROCESSING_STALE_AFTER_MS;
+        if (await repository.hasActiveRunnerWorkflow(staleBeforeMs)) {
+            return started;
         }
-        const attempt = row.retry_count + 1;
-        const eventRevision = await plannedEventRevision(row, options);
-        const executionName = `earthquake-${sanitizeExecutionName(row.source_event_id)}-r${eventRevision}-a${attempt}`;
-        const start = await repository.tryStartRunnerWorkflowExclusively(
-            row.source_event_id,
-            executionName,
+        await repository.recoverStaleProcessing(
+            staleBeforeMs,
             nowMs,
-            row.retry_count,
-            eventRevision,
+            nowMs + FAILED_RETRY_BACKOFF_MS,
         );
-        if (start === null) {
-            break;
+        if (await repository.hasActiveRunnerWorkflow(staleBeforeMs)) {
+            return started;
         }
-        try {
-            const request = {
-                sourceEventId: row.source_event_id,
-                executionName,
-                attempt: start.attempt,
-            } as WorkflowStartRequest;
-            Object.defineProperty(request, "eventRevision", {
-                value: start.eventRevision,
-                enumerable: false,
-            });
-            await workflow.start(request);
-        } catch (error) {
-            await repository.markFailed(
+        const rows = await repository.listDue(nowMs, limit - handled);
+        if (rows.length === 0) {
+            return started;
+        }
+        let madeProgress = false;
+        for (const row of rows) {
+            if (row.finalization_deadline_at_ms <= nowMs && isPendingStatus(row.status)) {
+                await repository.markRejected(row.source_event_id, "REJECTED_AUTO_TRIGGER", nowMs);
+                handled += 1;
+                madeProgress = true;
+                continue;
+            }
+            const attempt = row.retry_count + 1;
+            const eventRevision = await plannedEventRevision(row, options);
+            const executionName = `earthquake-${sanitizeExecutionName(row.source_event_id)}-r${eventRevision}-a${attempt}`;
+            const start = await repository.tryStartRunnerWorkflowExclusively(
                 row.source_event_id,
-                "AWS_RUNNER_START_FAILED",
+                executionName,
                 nowMs,
-                nowMs + FAILED_RETRY_BACKOFF_MS,
-                error instanceof Error ? error.message : String(error),
-                start.attempt,
+                row.retry_count,
+                eventRevision,
             );
-            await repository.markWorkflowStopped(row.source_event_id, start.attempt, nowMs);
+            if (start === null) {
+                continue;
+            }
+            try {
+                const request = {
+                    sourceEventId: row.source_event_id,
+                    executionName,
+                    attempt: start.attempt,
+                } as WorkflowStartRequest;
+                Object.defineProperty(request, "eventRevision", {
+                    value: start.eventRevision,
+                    enumerable: false,
+                });
+                await workflow.start(request);
+            } catch (error) {
+                await repository.markFailed(
+                    row.source_event_id,
+                    "AWS_RUNNER_START_FAILED",
+                    nowMs,
+                    nowMs + FAILED_RETRY_BACKOFF_MS,
+                    error instanceof Error ? error.message : String(error),
+                    start.attempt,
+                );
+                await repository.markWorkflowStopped(row.source_event_id, start.attempt, nowMs);
+                handled += 1;
+                madeProgress = true;
+                continue;
+            }
+            started += 1;
+            handled += 1;
+            madeProgress = true;
             break;
         }
-        started += 1;
-        break;
+        if (!madeProgress) {
+            return started;
+        }
     }
     return started;
 }
