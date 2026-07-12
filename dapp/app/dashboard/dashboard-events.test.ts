@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { MoveEvent } from "../chain/graphql-event-client";
 import {
     type DashboardEventReadClient,
     parseDashboardDisasterEvent,
@@ -14,12 +15,18 @@ const EVENT_ID = `0x${"33".repeat(32)}`;
 const RECIPIENT = `0x${"44".repeat(32)}`;
 const DONOR = `0x${"55".repeat(32)}`;
 
-function eventEnvelope(parsedJson: Record<string, unknown>, overrides: Record<string, unknown> = {}) {
+function eventEnvelope(
+    json: Record<string, unknown>,
+    overrides: {
+        readonly id?: string | { readonly txDigest: string; readonly eventSeq: string };
+        readonly timestampMs?: string | number;
+    } = {},
+): MoveEvent {
+    const rawId = overrides.id ?? "digest:1";
     return {
-        id: { txDigest: "digest", eventSeq: "1" },
-        timestampMs: "1700000000000",
-        parsedJson,
-        ...overrides,
+        id: typeof rawId === "string" ? rawId : `${rawId.txDigest}:${rawId.eventSeq}`,
+        timestampMs: Number(overrides.timestampMs ?? 1_700_000_000_000),
+        json,
     };
 }
 
@@ -128,8 +135,8 @@ describe("readDashboardEvents", () => {
         const donationType = `${PACKAGE_ID}::donation::GeneralDonationReceived`;
         const floorType = `${PACKAGE_ID}::campaign::FloorPaid`;
         const disasterType = `${PACKAGE_ID}::disaster_event::DisasterEventCreated`;
-        const queryEvents = vi.fn(async (input: { query: { MoveEventType: string } }) => {
-            if (input.query.MoveEventType === donationType) {
+        const queryMoveEvents = vi.fn(async (input: { type: string }) => {
+            if (input.type === donationType) {
                 return {
                     data: [
                         eventEnvelope(
@@ -140,7 +147,7 @@ describe("readDashboardEvents", () => {
                     hasNextPage: false,
                 };
             }
-            if (input.query.MoveEventType === floorType) {
+            if (input.type === floorType) {
                 return {
                     data: [
                         eventEnvelope(
@@ -169,7 +176,7 @@ describe("readDashboardEvents", () => {
                     hasNextPage: false,
                 };
             }
-            if (input.query.MoveEventType === disasterType) {
+            if (input.type === disasterType) {
                 return {
                     data: [
                         eventEnvelope(
@@ -191,7 +198,7 @@ describe("readDashboardEvents", () => {
             }
             return { data: [], hasNextPage: false };
         });
-        const client: DashboardEventReadClient = { queryEvents };
+        const client: DashboardEventReadClient = { queryMoveEvents };
 
         const result = await readDashboardEvents(client, { packageId: PACKAGE_ID, limit: 10 });
 
@@ -237,24 +244,24 @@ describe("readDashboardEvents", () => {
                 status: "finalized",
             },
         });
-        expect(queryEvents.mock.calls.map((call) => call[0].query.MoveEventType)).toContain(
+        expect(queryMoveEvents.mock.calls.map((call) => call[0].type)).toContain(
             donationType,
         );
-        expect(queryEvents.mock.calls.map((call) => call[0].query.MoveEventType)).toContain(
+        expect(queryMoveEvents.mock.calls.map((call) => call[0].type)).toContain(
             floorType,
         );
-        expect(queryEvents.mock.calls.map((call) => call[0].query.MoveEventType)).toContain(
+        expect(queryMoveEvents.mock.calls.map((call) => call[0].type)).toContain(
             disasterType,
         );
     });
 
-    it("follows paginated queryEvents responses", async () => {
-        const nextCursor = { txDigest: "cursor", eventSeq: "1" };
-        const queryEvents = vi.fn(async (input: {
-            query: { MoveEventType: string };
-            cursor?: typeof nextCursor | null;
+    it("follows paginated event query responses", async () => {
+        const nextCursor = "next-page";
+        const queryMoveEvents = vi.fn(async (input: {
+            type: string;
+            cursor?: string | null;
         }) => {
-            if (!input.query.MoveEventType.endsWith("::donation::DonationSplit")) {
+            if (!input.type.endsWith("::donation::DonationSplit")) {
                 return { data: [], hasNextPage: false };
             }
             if (input.cursor === nextCursor) {
@@ -283,19 +290,19 @@ describe("readDashboardEvents", () => {
             return { data: [], hasNextPage: true, nextCursor };
         });
 
-        const result = await readDashboardEvents({ queryEvents }, { packageId: PACKAGE_ID });
+        const result = await readDashboardEvents({ queryMoveEvents }, { packageId: PACKAGE_ID });
 
         expect(result.kind).toBe("ok");
         if (result.kind !== "ok") {
             return;
         }
         expect(result.donations).toHaveLength(1);
-        expect(queryEvents.mock.calls.some((call) => call[0].cursor === nextCursor)).toBe(true);
+        expect(queryMoveEvents.mock.calls.some((call) => call[0].cursor === nextCursor)).toBe(true);
     });
 
     it("keeps total claim count separate from the visible claim limit", async () => {
-        const queryEvents = vi.fn(async (input: { query: { MoveEventType: string } }) => {
-            if (!input.query.MoveEventType.endsWith("::campaign::PayoutClaimed")) {
+        const queryMoveEvents = vi.fn(async (input: { type: string }) => {
+            if (!input.type.endsWith("::campaign::PayoutClaimed")) {
                 return { data: [], hasNextPage: false };
             }
             return {
@@ -319,7 +326,7 @@ describe("readDashboardEvents", () => {
             };
         });
 
-        const result = await readDashboardEvents({ queryEvents }, { packageId: PACKAGE_ID, limit: 10 });
+        const result = await readDashboardEvents({ queryMoveEvents }, { packageId: PACKAGE_ID, limit: 10 });
 
         expect(result.kind).toBe("ok");
         if (result.kind !== "ok") {
@@ -331,8 +338,8 @@ describe("readDashboardEvents", () => {
 
     it("prefers the latest revision when one source event has multiple disaster events", async () => {
         const disasterType = `${PACKAGE_ID}::disaster_event::DisasterEventCreated`;
-        const queryEvents = vi.fn(async (input: { query: { MoveEventType: string } }) => {
-            if (input.query.MoveEventType !== disasterType) {
+        const queryMoveEvents = vi.fn(async (input: { type: string }) => {
+            if (input.type !== disasterType) {
                 return { data: [], hasNextPage: false };
             }
             return {
@@ -368,7 +375,7 @@ describe("readDashboardEvents", () => {
             };
         });
 
-        const result = await readDashboardEvents({ queryEvents }, { packageId: PACKAGE_ID });
+        const result = await readDashboardEvents({ queryMoveEvents }, { packageId: PACKAGE_ID });
 
         expect(result.kind).toBe("ok");
         if (result.kind !== "ok") {
@@ -383,7 +390,7 @@ describe("readDashboardEvents", () => {
 
     it("returns error for missing package id or RPC failure", async () => {
         await expect(
-            readDashboardEvents({ queryEvents: vi.fn() }, { packageId: "" }),
+            readDashboardEvents({ queryMoveEvents: vi.fn() }, { packageId: "" }),
         ).resolves.toEqual({
             kind: "error",
             message: "Package id is required to read dashboard events.",
@@ -392,7 +399,7 @@ describe("readDashboardEvents", () => {
         await expect(
             readDashboardEvents(
                 {
-                    queryEvents: vi.fn(async () => {
+                    queryMoveEvents: vi.fn(async () => {
                         throw new Error("rpc unavailable");
                     }),
                 },

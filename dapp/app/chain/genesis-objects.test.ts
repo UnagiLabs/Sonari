@@ -23,9 +23,11 @@ function genesisEvent(
     objectId: string,
     objectKind: number,
     createdAtMs = "1000",
-): { readonly parsedJson: Record<string, unknown> } {
+): { readonly id: string; readonly timestampMs: number; readonly json: Record<string, unknown> } {
     return {
-        parsedJson: {
+        id: `${objectId}:${objectKind}`,
+        timestampMs: Number(createdAtMs),
+        json: {
             object_id: objectId,
             object_kind: objectKind,
             shared: true,
@@ -69,7 +71,7 @@ describe("parseGenesisObjectCreatedEvent", () => {
 
 describe("resolveMembershipDappGenesisObjects", () => {
     it("resolves required membership dapp objects from genesis events", async () => {
-        const queryEvents = vi.fn(async () => ({
+        const queryMoveEvents = vi.fn(async () => ({
             data: [
                 genesisEvent(PAUSE_STATE_ID, GENESIS_OBJECT_KIND.pauseState),
                 genesisEvent(MEMBERSHIP_REGISTRY_ID, GENESIS_OBJECT_KIND.membershipRegistry),
@@ -83,7 +85,7 @@ describe("resolveMembershipDappGenesisObjects", () => {
             hasNextPage: false,
         }));
 
-        const result = await resolveMembershipDappGenesisObjects({ queryEvents }, { packageId: PACKAGE_ID });
+        const result = await resolveMembershipDappGenesisObjects({ queryMoveEvents }, { packageId: PACKAGE_ID });
         expect(result).toEqual({
             kind: "ok",
             objects: {
@@ -97,7 +99,7 @@ describe("resolveMembershipDappGenesisObjects", () => {
     });
 
     it("fails closed when a required object kind is missing", async () => {
-        const queryEvents = vi.fn(async () => ({
+        const queryMoveEvents = vi.fn(async () => ({
             data: [
                 genesisEvent(PAUSE_STATE_ID, GENESIS_OBJECT_KIND.pauseState),
                 genesisEvent(MEMBERSHIP_REGISTRY_ID, GENESIS_OBJECT_KIND.membershipRegistry),
@@ -110,7 +112,7 @@ describe("resolveMembershipDappGenesisObjects", () => {
             hasNextPage: false,
         }));
 
-        const result = await resolveMembershipDappGenesisObjects({ queryEvents }, { packageId: PACKAGE_ID });
+        const result = await resolveMembershipDappGenesisObjects({ queryMoveEvents }, { packageId: PACKAGE_ID });
         expect(result.kind).toBe("error");
         expect(result.message).toContain("cellCountIndex");
         expect(result.message).toContain("14");
@@ -120,29 +122,29 @@ describe("resolveMembershipDappGenesisObjects", () => {
         const result = await resolveMembershipDappGenesisObjects({}, { packageId: PACKAGE_ID });
         expect(result).toEqual({
             kind: "error",
-            message: "A queryEvents-capable Sui client is required to resolve genesis objects.",
+            message: "A Move event query client is required to resolve genesis objects.",
         });
     });
 
     it("returns an error result for invalid package ids", async () => {
-        const queryEvents = vi.fn();
-        const result = await resolveMembershipDappGenesisObjects({ queryEvents }, { packageId: "not-a-package" });
+        const queryMoveEvents = vi.fn();
+        const result = await resolveMembershipDappGenesisObjects({ queryMoveEvents }, { packageId: "not-a-package" });
         expect(result.kind).toBe("error");
-        expect(queryEvents).not.toHaveBeenCalled();
+        expect(queryMoveEvents).not.toHaveBeenCalled();
     });
 
     it("returns an error result for query errors", async () => {
-        const queryEvents = vi.fn(async () => {
+        const queryMoveEvents = vi.fn(async () => {
             throw new Error("rpc down");
         });
-        const result = await resolveMembershipDappGenesisObjects({ queryEvents }, { packageId: PACKAGE_ID });
+        const result = await resolveMembershipDappGenesisObjects({ queryMoveEvents }, { packageId: PACKAGE_ID });
         expect(result).toEqual({ kind: "error", message: "rpc down" });
     });
 });
 
 describe("readGenesisObjectIds", () => {
     it("returns a map of object kind to object id from a single page", async () => {
-        const queryEvents = vi.fn(async () => ({
+        const queryMoveEvents = vi.fn(async () => ({
             data: [
                 genesisEvent(PAUSE_STATE_ID, GENESIS_OBJECT_KIND.pauseState),
                 genesisEvent(MAIN_POOL_ID, GENESIS_OBJECT_KIND.mainPool),
@@ -154,7 +156,7 @@ describe("readGenesisObjectIds", () => {
             hasNextPage: false,
         }));
 
-        const result = await readGenesisObjectIds({ queryEvents }, { packageId: PACKAGE_ID });
+        const result = await readGenesisObjectIds({ queryMoveEvents }, { packageId: PACKAGE_ID });
         expect(result.kind).toBe("ok");
         if (result.kind !== "ok") {
             return;
@@ -178,7 +180,7 @@ describe("readGenesisObjectIds", () => {
 
     it("keeps the record with the newest created_at_ms when a kind repeats", async () => {
         const newerMainPool = `0x${"33".repeat(32)}`;
-        const queryEvents = vi.fn(async () => ({
+        const queryMoveEvents = vi.fn(async () => ({
             data: [
                 genesisEvent(newerMainPool, GENESIS_OBJECT_KIND.mainPool, "2000"),
                 genesisEvent(MAIN_POOL_ID, GENESIS_OBJECT_KIND.mainPool, "1000"),
@@ -186,7 +188,7 @@ describe("readGenesisObjectIds", () => {
             hasNextPage: false,
         }));
 
-        const result = await readGenesisObjectIds({ queryEvents }, { packageId: PACKAGE_ID });
+        const result = await readGenesisObjectIds({ queryMoveEvents }, { packageId: PACKAGE_ID });
         expect(result.kind).toBe("ok");
         if (result.kind !== "ok") {
             return;
@@ -195,19 +197,19 @@ describe("readGenesisObjectIds", () => {
     });
 
     it("walks across pages until the cursor is exhausted", async () => {
-        const queryEvents = vi
+        const queryMoveEvents = vi
             .fn()
             .mockResolvedValueOnce({
                 data: [genesisEvent(MAIN_POOL_ID, GENESIS_OBJECT_KIND.mainPool)],
                 hasNextPage: true,
-                nextCursor: { txDigest: "d", eventSeq: "1" },
+                nextCursor: "cursor-1",
             })
             .mockResolvedValueOnce({
                 data: [genesisEvent(OPERATIONS_POOL_ID, GENESIS_OBJECT_KIND.operationsPool)],
                 hasNextPage: false,
             });
 
-        const result = await readGenesisObjectIds({ queryEvents }, { packageId: PACKAGE_ID });
+        const result = await readGenesisObjectIds({ queryMoveEvents }, { packageId: PACKAGE_ID });
         expect(result.kind).toBe("ok");
         if (result.kind !== "ok") {
             return;
@@ -216,21 +218,21 @@ describe("readGenesisObjectIds", () => {
         expect(selectGenesisObjectId(result.ids, GENESIS_OBJECT_KIND.operationsPool)).toBe(
             OPERATIONS_POOL_ID,
         );
-        expect(queryEvents).toHaveBeenCalledTimes(2);
+        expect(queryMoveEvents).toHaveBeenCalledTimes(2);
     });
 
     it("fails closed when the package id is invalid", async () => {
-        const queryEvents = vi.fn();
-        const result = await readGenesisObjectIds({ queryEvents }, { packageId: "not-a-package" });
+        const queryMoveEvents = vi.fn();
+        const result = await readGenesisObjectIds({ queryMoveEvents }, { packageId: "not-a-package" });
         expect(result.kind).toBe("error");
-        expect(queryEvents).not.toHaveBeenCalled();
+        expect(queryMoveEvents).not.toHaveBeenCalled();
     });
 
     it("wraps query errors as an error result", async () => {
-        const queryEvents = vi.fn(async () => {
+        const queryMoveEvents = vi.fn(async () => {
             throw new Error("rpc down");
         });
-        const result = await readGenesisObjectIds({ queryEvents }, { packageId: PACKAGE_ID });
+        const result = await readGenesisObjectIds({ queryMoveEvents }, { packageId: PACKAGE_ID });
         expect(result).toEqual({ kind: "error", message: "rpc down" });
     });
 });

@@ -1,31 +1,15 @@
 import { bcs } from "@mysten/sui/bcs";
 import { deriveDynamicFieldID, fromBase64 } from "@mysten/sui/utils";
+import type { MoveEventQueryClient } from "../chain/graphql-event-client";
 
 const QUERY_EVENTS_PAGE_LIMIT = 100;
-
-export interface ClaimCampaignEventCursor {
-    readonly txDigest: string;
-    readonly eventSeq: string;
-}
 
 export interface ClaimCampaignObject {
     readonly objectId: string;
     readonly json: Record<string, unknown> | null;
 }
 
-export interface ClaimCampaignReadClient {
-    queryEvents(input: {
-        readonly query: {
-            readonly MoveEventType: string;
-        };
-        readonly cursor?: ClaimCampaignEventCursor | null;
-        readonly limit?: number;
-        readonly order?: "ascending" | "descending";
-    }): Promise<{
-        readonly data: readonly unknown[];
-        readonly hasNextPage?: boolean;
-        readonly nextCursor?: ClaimCampaignEventCursor | null;
-    }>;
+export interface ClaimCampaignReadClient extends MoveEventQueryClient {
     getObjects(input: {
         readonly objectIds: string[];
         readonly include: { readonly json: true };
@@ -579,18 +563,17 @@ async function readCampaignCreatedEvents(
     eventType: string,
 ): Promise<CampaignCreatedEvent[]> {
     const events: CampaignCreatedEvent[] = [];
-    let cursor: ClaimCampaignEventCursor | null | undefined;
+    let cursor: string | null | undefined;
 
     for (;;) {
-        const response = await client.queryEvents({
-            query: { MoveEventType: eventType },
+        const response = await client.queryMoveEvents({
+            type: eventType,
             ...(cursor !== undefined ? { cursor } : {}),
             limit: QUERY_EVENTS_PAGE_LIMIT,
-            order: "descending",
         });
 
         for (const item of response.data) {
-            const parsed = parseCampaignCreatedEvent(readParsedJson(item));
+            const parsed = parseCampaignCreatedEvent(item.json);
             if (parsed !== null) {
                 events.push(parsed);
             }
@@ -656,13 +639,6 @@ async function readDisasterEventObjects(
         }
     }
     return disasters;
-}
-
-function readParsedJson(value: unknown): unknown {
-    if (!isRecord(value)) {
-        return undefined;
-    }
-    return value.parsedJson;
 }
 
 function parseObjectId(value: unknown): string | null {

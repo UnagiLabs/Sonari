@@ -1,7 +1,6 @@
 "use client";
 
 import { useCurrentClient } from "@mysten/dapp-kit-react";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -9,9 +8,10 @@ import {
     readGenesisObjectIds,
     selectGenesisObjectId,
 } from "../chain/genesis-objects";
+import { createGraphqlEventClient } from "../chain/graphql-event-client";
 import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
-import { readWalletNetwork, resolveGrpcBaseUrl } from "../wallet/wallet-network";
+import { readWalletNetwork } from "../wallet/wallet-network";
 import { readDashboardPools } from "./dashboard-chain";
 import { readDashboardEvents } from "./dashboard-events";
 import {
@@ -56,7 +56,7 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
         cancelRef.current = cancel;
         setState({ status: "loading" });
 
-        const eventClient = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
+        const eventClient = createGraphqlEventClient({ network });
 
         void (async () => {
             // pool ID は環境変数ではなく packageID 起点の genesis イベントから導出する。

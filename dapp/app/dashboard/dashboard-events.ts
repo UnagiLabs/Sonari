@@ -1,24 +1,8 @@
+import type { MoveEvent, MoveEventQueryClient } from "../chain/graphql-event-client";
+
 const QUERY_EVENTS_PAGE_LIMIT = 50;
 
-export interface DashboardEventCursor {
-    readonly txDigest: string;
-    readonly eventSeq: string;
-}
-
-export interface DashboardEventReadClient {
-    queryEvents(input: {
-        readonly query: {
-            readonly MoveEventType: string;
-        };
-        readonly cursor?: DashboardEventCursor | null;
-        readonly limit?: number;
-        readonly order?: "ascending" | "descending";
-    }): Promise<{
-        readonly data: readonly unknown[];
-        readonly hasNextPage?: boolean;
-        readonly nextCursor?: DashboardEventCursor | null;
-    }>;
-}
+export type DashboardEventReadClient = MoveEventQueryClient;
 
 export type DonationEventSource = "split" | "general" | "operations";
 export type PayoutEventSource = "floor" | "payout";
@@ -140,13 +124,13 @@ export function parseDashboardDonationEvent(
     }
 
     const amountUsdc =
-        source === "split" ? parseU64(event.parsedJson.total_amount) : parseU64(event.parsedJson.amount);
+        source === "split" ? parseU64(event.json.total_amount) : parseU64(event.json.amount);
     const actor =
-        source === "split" ? parseObjectId(event.parsedJson.donor) : parseObjectId(event.parsedJson.actor);
+        source === "split" ? parseObjectId(event.json.donor) : parseObjectId(event.json.actor);
     const poolId =
         source === "split"
-            ? parseObjectId(event.parsedJson.main_pool_id)
-            : parseObjectId(event.parsedJson.pool_id);
+            ? parseObjectId(event.json.main_pool_id)
+            : parseObjectId(event.json.pool_id);
 
     if (amountUsdc === null || actor === null || poolId === null) {
         return null;
@@ -174,12 +158,12 @@ export function parseDashboardPayoutEvent(
         return null;
     }
 
-    const campaignId = parseObjectId(event.parsedJson.campaign_id);
-    const amountUsdc = parseU64(event.parsedJson.amount_usdc);
-    const recipient = parseObjectId(event.parsedJson.recipient);
+    const campaignId = parseObjectId(event.json.campaign_id);
+    const amountUsdc = parseU64(event.json.amount_usdc);
+    const recipient = parseObjectId(event.json.recipient);
     const occurredAtMs =
         source === "floor"
-            ? (parseU64Number(event.parsedJson.paid_at_ms) ?? event.timestampMs)
+            ? (parseU64Number(event.json.paid_at_ms) ?? event.timestampMs)
             : event.timestampMs;
 
     if (campaignId === null || amountUsdc === null || recipient === null) {
@@ -205,14 +189,14 @@ export function parseDashboardDisasterEvent(raw: unknown): DashboardDisasterEven
         return null;
     }
 
-    const id = parseObjectId(event.parsedJson.disaster_event_id);
-    const sourceEventId = parseNonEmptyString(event.parsedJson.source_event_id);
-    const eventRevision = parseU32(event.parsedJson.event_revision);
-    const title = parseNonEmptyString(event.parsedJson.title);
-    const region = parseNonEmptyString(event.parsedJson.region);
-    const hazardLabel = parseNonEmptyString(event.parsedJson.hazard_label);
-    const affectedCellCount = parseU64(event.parsedJson.affected_cell_count);
-    const occurredAtMs = parseU64Number(event.parsedJson.created_at_ms) ?? event.timestampMs;
+    const id = parseObjectId(event.json.disaster_event_id);
+    const sourceEventId = parseNonEmptyString(event.json.source_event_id);
+    const eventRevision = parseU32(event.json.event_revision);
+    const title = parseNonEmptyString(event.json.title);
+    const region = parseNonEmptyString(event.json.region);
+    const hazardLabel = parseNonEmptyString(event.json.hazard_label);
+    const affectedCellCount = parseU64(event.json.affected_cell_count);
+    const occurredAtMs = parseU64Number(event.json.created_at_ms) ?? event.timestampMs;
 
     if (
         id === null ||
@@ -245,14 +229,13 @@ async function readTypedEvents<T>(
     parse: (value: unknown) => T | null,
 ): Promise<T[]> {
     const result: T[] = [];
-    let cursor: DashboardEventCursor | null | undefined;
+    let cursor: string | null | undefined;
 
     for (;;) {
-        const response = await client.queryEvents({
-            query: { MoveEventType: eventType },
+        const response = await client.queryMoveEvents({
+            type: eventType,
             ...(cursor !== undefined ? { cursor } : {}),
             limit: QUERY_EVENTS_PAGE_LIMIT,
-            order: "descending",
         });
 
         for (const item of response.data) {
@@ -271,26 +254,24 @@ async function readTypedEvents<T>(
 
 function parseEventEnvelope(
     raw: unknown,
-): { readonly id: string; readonly timestampMs: number; readonly parsedJson: Record<string, unknown> } | null {
-    if (!isRecord(raw) || !isRecord(raw.parsedJson)) {
+): { readonly id: string; readonly timestampMs: number; readonly json: Record<string, unknown> } | null {
+    if (!isMoveEvent(raw)) {
         return null;
     }
-
-    const id = parseEventId(raw.id);
     const timestampMs = parseU64Number(raw.timestampMs);
-    if (id === null || timestampMs === null) {
+    if (timestampMs === null) {
         return null;
     }
-    return { id, timestampMs, parsedJson: raw.parsedJson };
+    return { id: raw.id, timestampMs, json: raw.json };
 }
 
-function parseEventId(raw: unknown): string | null {
-    if (!isRecord(raw)) {
-        return null;
-    }
-    const txDigest = parseNonEmptyString(raw.txDigest);
-    const eventSeq = parseNonEmptyString(raw.eventSeq);
-    return txDigest === null || eventSeq === null ? null : `${txDigest}:${eventSeq}`;
+function isMoveEvent(raw: unknown): raw is MoveEvent {
+    return (
+        isRecord(raw) &&
+        typeof raw.id === "string" &&
+        typeof raw.timestampMs === "number" &&
+        isRecord(raw.json)
+    );
 }
 
 function uniqueById<T extends { readonly id: string }>(items: readonly T[]): T[] {

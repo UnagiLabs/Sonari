@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-    type DonateEventCursor,
     type DonateDestinationReadClient,
     categoryLabel,
     parseCampaignCreatedEvent,
     parseCategoryPoolCreatedEvent,
     readDonateDestinations,
 } from "./donate-destinations";
+import type { MoveEvent } from "../chain/graphql-event-client";
 
 const PACKAGE_ID = `0x${"ab".repeat(32)}`;
 const CAMPAIGN_TYPE = `${PACKAGE_ID}::campaign::CampaignCreated`;
@@ -32,13 +32,18 @@ function categoryPoolParsedJson(overrides: Record<string, unknown> = {}): Record
     };
 }
 
+function moveEvent(json: Record<string, unknown>, id = "digest:0"): MoveEvent {
+    return { id, timestampMs: 1_700_000_000_000, json };
+}
+
 function stubClient(entries: {
-    readonly [eventType: string]: readonly unknown[];
+    readonly [eventType: string]: readonly MoveEvent[];
 }): DonateDestinationReadClient {
     return {
-        queryEvents: vi.fn(async (input: { query: { MoveEventType: string } }) => ({
-            data: entries[input.query.MoveEventType] ?? [],
+        queryMoveEvents: vi.fn(async (input: { type: string }) => ({
+            data: entries[input.type] ?? [],
             hasNextPage: false,
+            nextCursor: null,
         })),
     };
 }
@@ -116,8 +121,8 @@ describe("parseCategoryPoolCreatedEvent", () => {
 describe("readDonateDestinations", () => {
     it("queries campaign/category event filters and returns combined options", async () => {
         const client = stubClient({
-            [CAMPAIGN_TYPE]: [{ parsedJson: campaignParsedJson({ category: 9 }) }],
-            [CATEGORY_POOL_TYPE]: [{ parsedJson: categoryPoolParsedJson({ category: 9 }) }],
+            [CAMPAIGN_TYPE]: [moveEvent(campaignParsedJson({ category: 9 }))],
+            [CATEGORY_POOL_TYPE]: [moveEvent(categoryPoolParsedJson({ category: 9 }))],
         });
 
         const result = await readDonateDestinations(client, { packageId: PACKAGE_ID });
@@ -146,36 +151,34 @@ describe("readDonateDestinations", () => {
             ],
         });
 
-        const calls = (client.queryEvents as ReturnType<typeof vi.fn>).mock.calls;
-        const queryTypes = calls.map(([input]) => input.query.MoveEventType);
+        const calls = (client.queryMoveEvents as ReturnType<typeof vi.fn>).mock.calls;
+        const queryTypes = calls.map(([input]) => input.type);
         expect(queryTypes).toEqual([CAMPAIGN_TYPE, CATEGORY_POOL_TYPE]);
     });
 
-    it("follows paged queryEvents responses", async () => {
-        const nextCursor: DonateEventCursor = {
-            txDigest: "digest",
-            eventSeq: "1",
-        };
-        const queryEvents = vi.fn(async (input: {
-            query: { MoveEventType: string };
-            cursor?: DonateEventCursor | null;
+    it("follows paged event query responses", async () => {
+        const nextCursor = "next-page";
+        const queryMoveEvents = vi.fn(async (input: {
+            type: string;
+            cursor?: string | null;
         }) => {
-            if (input.query.MoveEventType === CATEGORY_POOL_TYPE) {
-                return { data: [], hasNextPage: false };
+            if (input.type === CATEGORY_POOL_TYPE) {
+                return { data: [], hasNextPage: false, nextCursor: null };
             }
             if (input.cursor === nextCursor) {
                 return {
-                    data: [{ parsedJson: campaignParsedJson({ category: 2 }) }],
+                    data: [moveEvent(campaignParsedJson({ category: 2 }), "digest:2")],
                     hasNextPage: false,
+                    nextCursor: null,
                 };
             }
             return {
-                data: [{ parsedJson: campaignParsedJson({ category: 1 }) }],
+                data: [moveEvent(campaignParsedJson({ category: 1 }), "digest:1")],
                 hasNextPage: true,
                 nextCursor,
             };
         });
-        const client: DonateDestinationReadClient = { queryEvents };
+        const client: DonateDestinationReadClient = { queryMoveEvents };
 
         const result = await readDonateDestinations(client, { packageId: PACKAGE_ID });
 
@@ -185,13 +188,13 @@ describe("readDonateDestinations", () => {
         }
         expect(result.campaigns.map((campaign) => campaign.category)).toEqual([1, 2]);
         expect(
-            queryEvents.mock.calls.some((call) => call[0].cursor === nextCursor),
+            queryMoveEvents.mock.calls.some((call) => call[0].cursor === nextCursor),
         ).toBe(true);
     });
 
     it("returns error when RPC query fails", async () => {
         const client: DonateDestinationReadClient = {
-            queryEvents: vi.fn(async () => {
+            queryMoveEvents: vi.fn(async () => {
                 throw new Error("rpc unavailable");
             }),
         };

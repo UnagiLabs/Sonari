@@ -10,7 +10,7 @@ import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { type FormEvent, useEffect, useState } from "react";
 import { resolveMembershipDappGenesisObjects } from "../../../chain/genesis-objects";
-import { createJsonRpcEventClient } from "../../../chain/json-rpc-event-client";
+import { createGraphqlEventClient } from "../../../chain/graphql-event-client";
 import {
     lookupMembershipPass,
     type MembershipLookupResult,
@@ -232,7 +232,7 @@ export function IdentityStep({
         }
         let cancelled = false;
         setGenesisObjects({ kind: "loading" });
-        resolveMembershipDappGenesisObjects(createJsonRpcEventClient(), {
+        resolveMembershipDappGenesisObjects(createGraphqlEventClient(), {
             packageId: membershipPackageId,
         })
             .then((result) => {

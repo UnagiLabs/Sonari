@@ -1,24 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 import { createClaimReadClient, type EventQueryClient } from "./claim-read-client";
 
-// queryEvents を差し替えるためのモックイベントクライアント。
-function makeEventClient(): EventQueryClient & { queryEvents: ReturnType<typeof vi.fn> } {
+// GraphQL event query を差し替えるためのモックイベントクライアント。
+function makeEventClient(): EventQueryClient & { queryMoveEvents: ReturnType<typeof vi.fn> } {
     return {
-        queryEvents: vi.fn(async () => ({ data: [], hasNextPage: false, nextCursor: null })),
+        queryMoveEvents: vi.fn(async () => ({ data: [], hasNextPage: false, nextCursor: null })),
     };
 }
 
 describe("createClaimReadClient", () => {
-    it("queryEvents は注入したイベントクライアントへ委譲する（gRPC ではなく JSON-RPC 経路）", async () => {
+    it("queryMoveEvents は注入した GraphQL イベントクライアントへ委譲する", async () => {
         const eventClient = makeEventClient();
         const grpc = { getObjects: vi.fn(), listOwnedObjects: vi.fn() };
         const client = createClaimReadClient(grpc, eventClient);
 
-        const input = { query: { MoveEventType: "0x1::campaign::CampaignCreated" } } as const;
-        await client.queryEvents(input);
+        const input = { type: "0x1::campaign::CampaignCreated" } as const;
+        await client.queryMoveEvents(input);
 
-        expect(eventClient.queryEvents).toHaveBeenCalledTimes(1);
-        expect(eventClient.queryEvents).toHaveBeenCalledWith(input);
+        expect(eventClient.queryMoveEvents).toHaveBeenCalledTimes(1);
+        expect(eventClient.queryMoveEvents).toHaveBeenCalledWith(input);
         // gRPC 側は呼ばれない。
         expect(grpc.getObjects).not.toHaveBeenCalled();
     });
@@ -72,11 +72,11 @@ describe("createClaimReadClient", () => {
         ).rejects.toThrow(/does not support getObjects/);
     });
 
-    it("queryEvents は grpc が未準備でも動く（JSON-RPC 経路は独立）", async () => {
+    it("queryMoveEvents は grpc が未準備でも動く（GraphQL 経路は独立）", async () => {
         const eventClient = makeEventClient();
         const client = createClaimReadClient(null, eventClient);
 
-        await client.queryEvents({ query: { MoveEventType: "0x1::campaign::CampaignCreated" } });
-        expect(eventClient.queryEvents).toHaveBeenCalledTimes(1);
+        await client.queryMoveEvents({ type: "0x1::campaign::CampaignCreated" });
+        expect(eventClient.queryMoveEvents).toHaveBeenCalledTimes(1);
     });
 });

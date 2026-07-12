@@ -1,24 +1,8 @@
+import type { MoveEventQueryClient } from "../chain/graphql-event-client";
+
 const QUERY_EVENTS_PAGE_LIMIT = 100;
 
-export interface DonateEventCursor {
-    readonly txDigest: string;
-    readonly eventSeq: string;
-}
-
-export interface DonateDestinationReadClient {
-    queryEvents(input: {
-        readonly query: {
-            readonly MoveEventType: string;
-        };
-        readonly cursor?: DonateEventCursor | null;
-        readonly limit?: number;
-        readonly order?: "ascending" | "descending";
-    }): Promise<{
-        readonly data: readonly unknown[];
-        readonly hasNextPage?: boolean;
-        readonly nextCursor?: DonateEventCursor | null;
-    }>;
-}
+export type DonateDestinationReadClient = MoveEventQueryClient;
 
 export interface CampaignDestination {
     readonly kind: "campaign";
@@ -146,18 +130,17 @@ async function readDestinationEvents<T>(
     parse: (value: unknown) => T | null,
 ): Promise<T[]> {
     const options: T[] = [];
-    let cursor: DonateEventCursor | null | undefined;
+    let cursor: string | null | undefined;
 
     for (;;) {
-        const response = await client.queryEvents({
-            query: { MoveEventType: eventType },
+        const response = await client.queryMoveEvents({
+            type: eventType,
             ...(cursor !== undefined ? { cursor } : {}),
             limit: QUERY_EVENTS_PAGE_LIMIT,
-            order: "descending",
         });
 
         for (const item of response.data) {
-            const option = parse(readParsedJson(item));
+            const option = parse(item.json);
             if (option !== null) {
                 options.push(option);
             }
@@ -168,13 +151,6 @@ async function readDestinationEvents<T>(
         }
         cursor = response.nextCursor;
     }
-}
-
-function readParsedJson(value: unknown): unknown {
-    if (!isRecord(value)) {
-        return undefined;
-    }
-    return value.parsedJson;
 }
 
 function parseObjectId(value: unknown): string | null {

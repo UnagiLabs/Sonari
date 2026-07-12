@@ -8,12 +8,12 @@ import {
     readClaimCampaigns,
 } from "./claim/claim-campaigns";
 import { readClaimConfig } from "./claim/claim-config";
-import { createJsonRpcEventClient } from "./chain/json-rpc-event-client";
+import { createGraphqlEventClient } from "./chain/graphql-event-client";
 import { resolveMembershipDappGenesisObjects } from "./chain/genesis-objects";
 import { type ClaimBannerCta, selectClaimBannerCta } from "./home-claim-banner-state";
 import { type MembershipPassReadClient, readMembershipPass } from "./mypage/membership-pass-read";
 
-// 受け取り判定に必要な読み取りは、campaign 取得（queryEvents/getObjects）と登録判定
+// 受け取り判定に必要な読み取りは、campaign 取得（GraphQL events/getObjects）と登録判定
 // （listOwnedObjects/getObjects）の両方を使う。claim 画面と同じく、両者を満たす
 // 1 つの read client にまとめて扱う。
 type HomeBannerReadClient = ClaimCampaignReadClient & MembershipPassReadClient;
@@ -105,7 +105,7 @@ export function useClaimBannerCta(): ClaimBannerCta | null {
     });
 }
 
-// queryEvents は JSON-RPC event client へ回し、object 読み取りは dapp-kit の
+// イベント検索は GraphQL event client へ回し、object 読み取りは dapp-kit の
 // Sui client へ委譲する。dapp-kit メソッドの this を保つため call で束ねる。
 function toHomeBannerReadClient(client: unknown): HomeBannerReadClient {
     if (typeof client !== "object" || client === null) {
@@ -117,9 +117,9 @@ function toHomeBannerReadClient(client: unknown): HomeBannerReadClient {
     if (typeof getObjects !== "function" || typeof listOwnedObjects !== "function") {
         throw new Error("Sui client does not support required claim reads.");
     }
-    const eventClient = createJsonRpcEventClient();
+    const eventClient = createGraphqlEventClient();
     return {
-        queryEvents: (input) => eventClient.queryEvents(input),
+        queryMoveEvents: (input) => eventClient.queryMoveEvents(input),
         getObjects: (input) => getObjects.call(client, input),
         listOwnedObjects: (input) => listOwnedObjects.call(client, input),
     };

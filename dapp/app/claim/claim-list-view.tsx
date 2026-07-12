@@ -42,7 +42,7 @@ type CampaignListState =
 export function ClaimListView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("claim");
     const suiClient = useCurrentClient();
-    // 読み取りは createClaimReadClient 経由。queryEvents は JSON-RPC、object 読み取りは
+    // 読み取りは createClaimReadClient 経由。イベントは GraphQL、object 読み取りは
     // gRPC（dApp Kit クライアント）へ委譲する（gRPC にイベント検索が無いため）。
     const client = useMemo(() => createClaimReadClient(suiClient), [suiClient]);
     const claimConfigResult = useMemo(() => readClaimConfig(), []);
