@@ -408,7 +408,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "SourceArchiverTokenSecretArn",
             "SourceArchiverPrivateKeySecretArn",
             "SourceArchiverSuiNetwork",
-            "SourceArchiverSuiRpcUrl",
+            "SourceArchiverSuiGrpcUrl",
             "SourceArchiverWalrusUploadRelayUrl",
             "SourceArchiverWalrusUploadRelayTipMaxMist",
             "SourceArchiverWalrusEpochs",

@@ -63,10 +63,10 @@ Parameters:
       - mainnet
       - testnet
     Description: Sui network used by the SourceArchiver Walrus SDK client.
-  SourceArchiverSuiRpcUrl:
+  SourceArchiverSuiGrpcUrl:
     Type: String
     Default: https://fullnode.testnet.sui.io:443
-    Description: Sui JSON-RPC URL used by the SourceArchiver Walrus SDK client.
+    Description: Sui gRPC URL used by the SourceArchiver Walrus SDK client.
   SourceArchiverWalrusUploadRelayUrl:
     Type: String
     Default: https://upload-relay.testnet.walrus.space
@@ -1344,7 +1344,7 @@ Resources:
           SOURCE_ARCHIVER_TOKEN_SECRET_ARN: !Ref SourceArchiverTokenSecretArn
           SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN: !Ref SourceArchiverPrivateKeySecretArn
           SUI_NETWORK: !Ref SourceArchiverSuiNetwork
-          SUI_RPC_URL: !Ref SourceArchiverSuiRpcUrl
+          SUI_GRPC_URL: !Ref SourceArchiverSuiGrpcUrl
           WALRUS_UPLOAD_RELAY_URL: !Ref SourceArchiverWalrusUploadRelayUrl
           WALRUS_UPLOAD_RELAY_TIP_MAX_MIST: !Ref SourceArchiverWalrusUploadRelayTipMaxMist
           WALRUS_EPOCHS: !Ref SourceArchiverWalrusEpochs

@@ -461,7 +461,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("AffectedProofRegistrarTokenSecretArn:");
         expect(template).toContain("HasAffectedProofRegistrarConfig:");
         expect(template).toContain("SourceArchiverSuiNetwork:");
-        expect(template).toContain("SourceArchiverSuiRpcUrl:");
+        expect(template).toContain("SourceArchiverSuiGrpcUrl:");
         expect(template).toContain("SourceArchiverWalrusUploadRelayUrl:");
         expect(template).toContain("SourceArchiverWalrusUploadRelayTipMaxMist:");
         expect(template).toContain("SourceArchiverWalrusEpochs:");
@@ -474,7 +474,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SourceArchiverFunctionUrlPermission:");
         expect(template).toContain("SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN:");
         expect(template).toContain("SUI_NETWORK:");
-        expect(template).toContain("SUI_RPC_URL:");
+        expect(template).toContain("SUI_GRPC_URL:");
         expect(template).toContain("WALRUS_UPLOAD_RELAY_URL:");
         expect(template).toContain("WALRUS_UPLOAD_RELAY_TIP_MAX_MIST:");
         expect(template).toContain("WALRUS_EPOCHS:");

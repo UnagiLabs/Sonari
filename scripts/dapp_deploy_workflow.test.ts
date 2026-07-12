@@ -50,7 +50,10 @@ describe("dapp deploy workflow", () => {
         expect(workflow).toContain("Resolve Sonari contract ids from Published.toml");
         expect(workflow).toContain("scripts/resolve_published_contract_ids.ts");
         expect(workflow).toContain("SONARI_SUI_NETWORK: $" + "{{ vars.SONARI_SUI_NETWORK }}");
-        expect(workflow).toContain("SUI_RPC_URL: $" + "{{ vars.SONARI_SUI_RPC_URL }}");
+        expect(workflow).toContain(
+            "SONARI_SUI_GRAPHQL_URL: $" + "{{ vars.SONARI_SUI_GRAPHQL_URL }}",
+        );
+        expect(workflow).toContain('resolver_args+=(--graphql-url "$SONARI_SUI_GRAPHQL_URL")');
 
         const resolverIndex = workflow.indexOf("Resolve Sonari contract ids from Published.toml");
         const deployIndex = workflow.indexOf("Build and deploy to Cloudflare");

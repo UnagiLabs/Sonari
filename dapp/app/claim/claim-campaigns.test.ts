@@ -114,7 +114,7 @@ describe("claim campaign parsing", () => {
     });
 
     it("parses base64-encoded event_uid and affected_cells_root from gRPC into 0x hex", () => {
-        // SuiGrpcClient は vector<u8> / [u8; 32] を base64 文字列で返す（JSON-RPC は数値配列）。
+        // SuiGrpcClient は vector<u8> / [u8; 32] を base64 文字列で返す。
         // base64 を扱えないと event_uid が null になり Campaign / DisasterEvent ごと脱落して
         // 一覧が常に空になる（#461 実機バグ）。base64 でも 0x hex へ復元できることを保証する。
         const bytes = Uint8Array.from({ length: 32 }, (_, index) => index);

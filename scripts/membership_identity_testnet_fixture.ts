@@ -527,8 +527,8 @@ export function parseMembershipPassIssuedId(input: unknown): string {
 // `SuiGrpcClient.signAndExecuteTransaction` (@mysten/sui) resolves to a `TransactionResult`
 // discriminated union (`{ $kind: "Transaction", Transaction: { events } }` or a
 // `FailedTransaction` variant), whose events use gRPC field names (`eventType` / `json`)
-// instead of the JSON-RPC shape (`type` / `parsedJson`). Adapt the gRPC result into the
-// JSON-RPC-ish shape so `parseMembershipPassIssuedId` can extract the issued pass id.
+// instead of the legacy event shape (`type` / `parsedJson`). Adapt the gRPC result into that
+// shape so `parseMembershipPassIssuedId` can extract the issued pass id.
 export function parseMembershipPassIssuedIdFromSdkResult(response: unknown): string {
     if (!isRecord(response)) {
         throw new Error("sui SDK transaction result must be an object");

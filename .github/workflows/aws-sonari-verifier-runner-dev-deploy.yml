@@ -822,7 +822,7 @@ jobs:
             "SourceArchiverTokenSecretArn",
             "SourceArchiverPrivateKeySecretArn",
             "SourceArchiverSuiNetwork",
-            "SourceArchiverSuiRpcUrl",
+            "SourceArchiverSuiGrpcUrl",
             "SourceArchiverWalrusUploadRelayUrl",
             "SourceArchiverWalrusUploadRelayTipMaxMist",
             "SourceArchiverWalrusEpochs",
@@ -845,15 +845,15 @@ jobs:
         env:
           # Sui network の単一情報源。Published.toml の [published.<network>] section を選ぶ。
           SONARI_SUI_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
-          SUI_RPC_URL: ${{ vars.SONARI_SUI_RPC_URL }}
+          SONARI_SUI_GRAPHQL_URL: ${{ vars.SONARI_SUI_GRAPHQL_URL }}
         run: |
           set -euo pipefail
           resolver_args=(
             scripts/resolve_published_contract_ids.ts
             --network "${SONARI_SUI_NETWORK:-testnet}"
           )
-          if [[ -n "${SUI_RPC_URL:-}" ]]; then
-            resolver_args+=(--rpc-url "$SUI_RPC_URL")
+          if [[ -n "${SONARI_SUI_GRAPHQL_URL:-}" ]]; then
+            resolver_args+=(--graphql-url "$SONARI_SUI_GRAPHQL_URL")
           fi
           pnpm tsx "${resolver_args[@]}"
 
@@ -861,7 +861,7 @@ jobs:
         shell: bash
         env:
           # earthquake relayer target は Published.toml 由来 package id から前段 step で導出する。
-          # object id は前段 resolver が publish tx の events から導出して GITHUB_ENV に置く。
+          # object id は前段 resolver が Sui events から導出して GITHUB_ENV に置く。
           RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}
           RELAYER_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
           RELAYER_GRPC_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}

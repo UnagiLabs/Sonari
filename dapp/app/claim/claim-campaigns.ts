@@ -652,7 +652,7 @@ function parseObjectId(value: unknown): string | null {
 function parseBytes32Hex(value: unknown): string | null {
     if (typeof value === "string") {
         const trimmed = value.trim();
-        // 0x 付き hex 形（JSON-RPC や明示 hex）
+        // 0x 付きの明示的な hex 形
         if (/^0x[0-9a-fA-F]{64}$/u.test(trimmed)) {
             return trimmed.toLowerCase();
         }

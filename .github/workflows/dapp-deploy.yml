@@ -115,7 +115,7 @@ jobs:
       - name: Resolve Sonari contract ids from Published.toml
         env:
           SONARI_SUI_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
-          SUI_RPC_URL: ${{ vars.SONARI_SUI_RPC_URL }}
+          SONARI_SUI_GRAPHQL_URL: ${{ vars.SONARI_SUI_GRAPHQL_URL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -123,8 +123,8 @@ jobs:
             scripts/resolve_published_contract_ids.ts
             --network "${SONARI_SUI_NETWORK:-testnet}"
           )
-          if [[ -n "${SUI_RPC_URL:-}" ]]; then
-            resolver_args+=(--rpc-url "$SUI_RPC_URL")
+          if [[ -n "${SONARI_SUI_GRAPHQL_URL:-}" ]]; then
+            resolver_args+=(--graphql-url "$SONARI_SUI_GRAPHQL_URL")
           fi
           pnpm tsx "${resolver_args[@]}"
 
