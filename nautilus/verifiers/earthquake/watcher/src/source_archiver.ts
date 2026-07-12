@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { decodeSuiPrivateKey, type Signer } from "@mysten/sui/cryptography";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { type WriteBlobStep, walrus } from "@mysten/walrus";
 
@@ -11,7 +11,7 @@ const SOURCE_HASH_PATTERN = /^0x[0-9a-f]{64}$/;
 const WALRUS_BLOB_ID_PATTERN = /^[A-Za-z0-9_-]{8,256}$/;
 const SUI_OBJECT_ID_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 const DEFAULT_SUI_NETWORK: WalrusSdkNetwork = "testnet";
-const DEFAULT_SUI_RPC_URL = "https://fullnode.testnet.sui.io:443";
+const DEFAULT_SUI_GRPC_URL = "https://fullnode.testnet.sui.io:443";
 const DEFAULT_WALRUS_UPLOAD_RELAY_URL = "https://upload-relay.testnet.walrus.space";
 const DEFAULT_WALRUS_UPLOAD_RELAY_TIP_MAX_MIST = 1_000;
 const DEFAULT_WALRUS_EPOCHS = 1;
@@ -100,7 +100,7 @@ export type WalrusSdkNetwork = "mainnet" | "testnet";
 export interface WalrusSdkStoreConfig {
     suiPrivateKey: string;
     suiNetwork?: WalrusSdkNetwork | undefined;
-    suiRpcUrl?: string | undefined;
+    suiGrpcUrl?: string | undefined;
     uploadRelayUrl?: string | undefined;
     uploadRelayTipMaxMist?: number | undefined;
     epochs?: number | undefined;
@@ -127,7 +127,7 @@ export interface WalrusSdkStoreClient {
 export interface WalrusSdkStoreClientFactory {
     create(input: {
         suiNetwork: WalrusSdkNetwork;
-        suiRpcUrl: string;
+        suiGrpcUrl: string;
         uploadRelayUrl: string;
         uploadRelayTipMaxMist: number;
     }): WalrusSdkStoreClient;
@@ -181,7 +181,7 @@ export type SourceArchiverLogEvent =
     | (SourceArchiverRequestLogContext & {
           event: "source_archiver.walrus_store.start";
           suiNetwork: WalrusSdkNetwork;
-          suiRpcUrl: string;
+          suiGrpcUrl: string;
           uploadRelayUrl: string;
           uploadRelayTipMaxMist: number;
           epochs: number;
@@ -302,13 +302,13 @@ function classifyWriteBlobError(error: unknown): SourceArchiverError {
 class DefaultWalrusSdkStoreClientFactory implements WalrusSdkStoreClientFactory {
     create(input: {
         suiNetwork: WalrusSdkNetwork;
-        suiRpcUrl: string;
+        suiGrpcUrl: string;
         uploadRelayUrl: string;
         uploadRelayTipMaxMist: number;
     }): WalrusSdkStoreClient {
-        return new SuiJsonRpcClient({
-            url: input.suiRpcUrl,
+        return new SuiGrpcClient({
             network: input.suiNetwork,
+            baseUrl: input.suiGrpcUrl,
         }).$extend(
             walrus({
                 uploadRelay: {
@@ -323,7 +323,7 @@ class DefaultWalrusSdkStoreClientFactory implements WalrusSdkStoreClientFactory 
 export class WalrusSdkStoreRunner implements WalrusStoreRunner {
     private readonly signer: Signer;
     private readonly suiNetwork: WalrusSdkNetwork;
-    private readonly suiRpcUrl: string;
+    private readonly suiGrpcUrl: string;
     private readonly uploadRelayUrl: string;
     private readonly uploadRelayTipMaxMist: number;
     private readonly epochs: number;
@@ -340,7 +340,7 @@ export class WalrusSdkStoreRunner implements WalrusStoreRunner {
     ) {
         this.signer = signerFromRawSuiPrivateKey(config.suiPrivateKey);
         this.suiNetwork = validateSuiNetwork(config.suiNetwork ?? DEFAULT_SUI_NETWORK);
-        this.suiRpcUrl = validateUrl(config.suiRpcUrl ?? DEFAULT_SUI_RPC_URL, "Sui RPC URL");
+        this.suiGrpcUrl = validateUrl(config.suiGrpcUrl ?? DEFAULT_SUI_GRPC_URL, "Sui gRPC URL");
         this.uploadRelayUrl = validateUrl(
             config.uploadRelayUrl ?? DEFAULT_WALRUS_UPLOAD_RELAY_URL,
             "Walrus upload relay URL",
@@ -366,7 +366,7 @@ export class WalrusSdkStoreRunner implements WalrusStoreRunner {
             event: "source_archiver.walrus_store.start",
             ...context,
             suiNetwork: this.suiNetwork,
-            suiRpcUrl: this.suiRpcUrl,
+            suiGrpcUrl: this.suiGrpcUrl,
             uploadRelayUrl: this.uploadRelayUrl,
             uploadRelayTipMaxMist: this.uploadRelayTipMaxMist,
             epochs: this.epochs,
@@ -376,7 +376,7 @@ export class WalrusSdkStoreRunner implements WalrusStoreRunner {
         try {
             const client = this.clientFactory.create({
                 suiNetwork: this.suiNetwork,
-                suiRpcUrl: this.suiRpcUrl,
+                suiGrpcUrl: this.suiGrpcUrl,
                 uploadRelayUrl: this.uploadRelayUrl,
                 uploadRelayTipMaxMist: this.uploadRelayTipMaxMist,
             });
@@ -551,7 +551,7 @@ export async function sourceArchiverHandler(
                             secrets,
                         ),
                         suiNetwork: readSuiNetworkEnv("SUI_NETWORK"),
-                        suiRpcUrl: readOptionalStringEnv("SUI_RPC_URL"),
+                        suiGrpcUrl: readOptionalStringEnv("SUI_GRPC_URL"),
                         uploadRelayUrl: readOptionalStringEnv("WALRUS_UPLOAD_RELAY_URL"),
                         uploadRelayTipMaxMist: readOptionalNonNegativeIntegerEnv(
                             "WALRUS_UPLOAD_RELAY_TIP_MAX_MIST",
@@ -1042,7 +1042,7 @@ function walrusSdkStoreConfig(input: WalrusSdkStoreConfig): WalrusSdkStoreConfig
     return {
         suiPrivateKey: input.suiPrivateKey,
         ...(input.suiNetwork === undefined ? {} : { suiNetwork: input.suiNetwork }),
-        ...(input.suiRpcUrl === undefined ? {} : { suiRpcUrl: input.suiRpcUrl }),
+        ...(input.suiGrpcUrl === undefined ? {} : { suiGrpcUrl: input.suiGrpcUrl }),
         ...(input.uploadRelayUrl === undefined ? {} : { uploadRelayUrl: input.uploadRelayUrl }),
         ...(input.uploadRelayTipMaxMist === undefined
             ? {}

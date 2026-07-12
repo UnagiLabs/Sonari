@@ -24,12 +24,6 @@ const ED25519_SIGNATURE_BYTES = 64;
 const ED25519_PUBLIC_KEY_BYTES = 32;
 const U32_MAX = 0xffff_ffff;
 const U64_MAX = 0xffff_ffff_ffff_ffffn;
-// Sui public fullnodes cap suix_queryEvents at QUERY_MAX_RESULT_LIMIT=50.
-const QUERY_EVENTS_PAGE_LIMIT = 50;
-const RPC_MAX_ATTEMPTS = 4;
-const RPC_INITIAL_RETRY_DELAY_MS = 500;
-const RPC_RETRY_BACKOFF_FACTOR = 2;
-const RETRYABLE_HTTP_STATUSES = new Set([429, 502, 503]);
 const HOME_CELL_REGISTERED_GRAPHQL_QUERY = `
 query SonariHomeCellRegisteredEvents(
   $eventType: String!
@@ -705,155 +699,6 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
     }
 }
 
-export class JsonRpcFloorCensusReader implements FloorCensusOnchainReader {
-    constructor(private readonly endpoint: string) {}
-
-    async listHomeCellRegisteredEvents(input: {
-        packageId: string;
-    }): Promise<HomeCellRegisteredEvent[]> {
-        const eventType = `${input.packageId}::membership::HomeCellRegistered`;
-        const events: HomeCellRegisteredEvent[] = [];
-        let cursor: unknown = null;
-        while (true) {
-            const page = await this.call("suix_queryEvents", [
-                { MoveEventType: eventType },
-                cursor,
-                QUERY_EVENTS_PAGE_LIMIT,
-                false,
-            ]);
-            const records = readArrayField(page, "data");
-            for (const record of records) {
-                const parsedJson = readRecordField(record, "parsedJson");
-                const lineage = readObjectId(parsedJson?.lineage);
-                const homeCell = readU64Decimal(parsedJson?.home_cell);
-                const registeredAtMs = readSafeInteger(parsedJson?.registered_at);
-                if (
-                    lineage === undefined ||
-                    homeCell === undefined ||
-                    registeredAtMs === undefined
-                ) {
-                    throw new Error("HomeCellRegistered event is malformed");
-                }
-                events.push({ lineage, homeCell, registeredAtMs });
-            }
-            cursor = readUnknownField(page, "nextCursor");
-            if (!readBooleanField(page, "hasNextPage") || cursor === null) {
-                break;
-            }
-        }
-        return events;
-    }
-
-    async listActiveLineages(input: {
-        membershipRegistryId: string;
-        lineages: readonly string[];
-    }): Promise<ReadonlySet<string>> {
-        const active = new Set<string>();
-        for (const lineage of input.lineages) {
-            const response = await this.call("suix_getDynamicFieldObject", [
-                input.membershipRegistryId,
-                { type: "0x2::object::ID", value: lineage },
-            ]);
-            const content = readRecordField(readRecordField(response, "data"), "content");
-            const fields = readRecordField(content, "fields");
-            const valueFields =
-                readRecordField(readRecordField(fields, "value"), "fields") ?? fields;
-            if (readSafeInteger(valueFields?.status) === 1) {
-                active.add(lineage);
-            }
-        }
-        return active;
-    }
-
-    async findCampaignId(input: {
-        digest: string;
-        eventUid: string;
-        eventRevision: number;
-    }): Promise<{ campaignId: string; checkpoint: number } | undefined> {
-        const response = await this.call("sui_getTransactionBlock", [
-            input.digest,
-            { showEvents: true, showObjectChanges: true },
-        ]);
-        const checkpoint = readSafeInteger(readUnknownField(response, "checkpoint"));
-        if (checkpoint === undefined) {
-            throw new Error("relayer transaction checkpoint is missing");
-        }
-        for (const event of readArrayField(response, "events")) {
-            const type = readStringField(event, "type");
-            if (type?.endsWith("::campaign::CampaignCreated") !== true) {
-                continue;
-            }
-            const parsedJson = readRecordField(event, "parsedJson");
-            const eventRevision = readSafeInteger(parsedJson?.event_revision);
-            const eventUid = readBytesHex(parsedJson?.event_uid);
-            if (
-                eventRevision === input.eventRevision &&
-                (eventUid === undefined || normalizeHex(eventUid) === normalizeHex(input.eventUid))
-            ) {
-                const campaignId = readObjectId(parsedJson?.campaign_id);
-                return campaignId === undefined ? undefined : { campaignId, checkpoint };
-            }
-        }
-        const candidates: string[] = [];
-        for (const change of readArrayField(response, "objectChanges")) {
-            const type = readStringField(change, "objectType");
-            if (type?.endsWith("::campaign::Campaign") === true) {
-                const objectId = readObjectId(readUnknownField(change, "objectId"));
-                if (objectId !== undefined) {
-                    candidates.push(objectId);
-                }
-            }
-        }
-        if (candidates.length > 1) {
-            throw new Error("relayer transaction included multiple Campaign object changes");
-        }
-        const campaignId = candidates[0];
-        return campaignId === undefined ? undefined : { campaignId, checkpoint };
-    }
-
-    private async call(method: string, params: unknown[]): Promise<unknown> {
-        const request = {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                jsonrpc: "2.0",
-                id: 1,
-                method,
-                params,
-            }),
-        };
-        for (let attempt = 0; attempt < RPC_MAX_ATTEMPTS; attempt += 1) {
-            let response: Response;
-            try {
-                response = await fetch(this.endpoint, request);
-            } catch (error) {
-                if (attempt + 1 >= RPC_MAX_ATTEMPTS) {
-                    throw new Error(`Sui RPC ${method} failed with network error`, {
-                        cause: error,
-                    });
-                }
-                await sleep(rpcRetryDelayMs(attempt));
-                continue;
-            }
-            if (!response.ok) {
-                if (isRetryableHttpStatus(response.status) && attempt + 1 < RPC_MAX_ATTEMPTS) {
-                    await sleep(rpcRetryDelayMs(attempt, response.headers.get("retry-after")));
-                    continue;
-                }
-                throw new Error(`Sui RPC ${method} failed with HTTP ${response.status}`);
-            }
-            const body = (await response.json()) as unknown;
-            const error = readRecordField(body, "error");
-            if (error !== undefined) {
-                const message = readStringField(error, "message") ?? JSON.stringify(error);
-                throw new Error(`Sui RPC ${method} failed: ${message}`);
-            }
-            return readUnknownField(body, "result");
-        }
-        throw new Error(`Sui RPC ${method} retry attempts exhausted`);
-    }
-}
-
 export class GraphqlFloorCensusReader implements FloorCensusOnchainReader {
     constructor(private readonly endpoint: string) {}
 
@@ -991,37 +836,6 @@ export class GraphqlFloorCensusReader implements FloorCensusOnchainReader {
         }
         return body;
     }
-}
-
-function isRetryableHttpStatus(status: number): boolean {
-    return RETRYABLE_HTTP_STATUSES.has(status);
-}
-
-function rpcRetryDelayMs(attempt: number, retryAfterHeader?: string | null): number {
-    const retryAfterMs = parseRetryAfterMs(retryAfterHeader);
-    if (retryAfterMs !== undefined) {
-        return retryAfterMs;
-    }
-    return RPC_INITIAL_RETRY_DELAY_MS * RPC_RETRY_BACKOFF_FACTOR ** attempt;
-}
-
-function parseRetryAfterMs(header: string | null | undefined): number | undefined {
-    if (header === null || header === undefined || header.length === 0) {
-        return undefined;
-    }
-    const seconds = Number(header);
-    if (Number.isFinite(seconds) && seconds >= 0) {
-        return Math.trunc(seconds * 1_000);
-    }
-    const timestamp = Date.parse(header);
-    if (Number.isNaN(timestamp)) {
-        return undefined;
-    }
-    return Math.max(0, timestamp - Date.now());
-}
-
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function validateCensusBinding(input: FloorCensusCountsInput): void {
@@ -1398,11 +1212,6 @@ function readRecordField(input: unknown, field: string): Record<string, unknown>
         : undefined;
 }
 
-function readArrayField(input: unknown, field: string): unknown[] {
-    const value = readUnknownField(input, field);
-    return Array.isArray(value) ? value : [];
-}
-
 function readUnknownField(input: unknown, field: string): unknown {
     return typeof input === "object" && input !== null && !Array.isArray(input)
         ? (input as Record<string, unknown>)[field]
@@ -1451,10 +1260,6 @@ function readSafeIntegerField(input: unknown, field: string): number {
         throw new Error(`Census TEE output ${field} is malformed`);
     }
     return parsed;
-}
-
-function readBooleanField(input: unknown, field: string): boolean {
-    return readUnknownField(input, field) === true;
 }
 
 function readObjectId(input: unknown): string | undefined {

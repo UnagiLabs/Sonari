@@ -21,7 +21,6 @@ import { FAILED_RETRY_BACKOFF_MS } from "../src/constants.js";
 import type { RelayerAdapter, RelayerErrorCode, RelayerSuccess } from "../src/relayer_preview.js";
 import {
     GraphqlFloorCensusReader,
-    JsonRpcFloorCensusReader,
     type FloorCensusOnchainReader,
 } from "../src/census.js";
 import {
@@ -2362,19 +2361,6 @@ describe("AWS runner workflow helper", () => {
         );
 
         expect(config?.reader).toBeInstanceOf(GraphqlFloorCensusReader);
-        expect(readReaderEndpoint(config?.reader)).toBe("https://graphql.testnet.sui.io/graphql");
-    });
-
-    it("does not use FLOOR_CENSUS_JSON_RPC_URL for the production floor census reader", () => {
-        setRequiredFloorCensusEnv();
-        process.env.FLOOR_CENSUS_JSON_RPC_URL = "https://fullnode.example:443";
-
-        const config = readFloorCensusConfigFromEnv(
-            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
-        );
-
-        expect(config?.reader).toBeInstanceOf(GraphqlFloorCensusReader);
-        expect(config?.reader).not.toBeInstanceOf(JsonRpcFloorCensusReader);
         expect(readReaderEndpoint(config?.reader)).toBe("https://graphql.testnet.sui.io/graphql");
     });
 
