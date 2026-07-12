@@ -73,11 +73,15 @@ export function createGraphqlEventClient(
 
     return {
         async queryMoveEvents(input): Promise<MoveEventPage> {
+            const requestedLimit = input.limit ?? DEFAULT_PAGE_LIMIT;
+            if (!Number.isInteger(requestedLimit) || requestedLimit <= 0) {
+                throw new Error("GraphQL event query limit must be a positive integer.");
+            }
             const result = await client.query({
                 query: EVENTS_QUERY,
                 variables: {
                     type: input.type,
-                    last: input.limit ?? DEFAULT_PAGE_LIMIT,
+                    last: Math.min(requestedLimit, DEFAULT_PAGE_LIMIT),
                     before: input.cursor ?? null,
                 },
             });

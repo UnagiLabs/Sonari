@@ -61,6 +61,15 @@ describe("dapp deploy workflow", () => {
         expect(deployIndex).toBeGreaterThan(resolverIndex);
     });
 
+    it("passes the GraphQL URL to the dapp build", async () => {
+        const workflow = await readWorkflow();
+        const deployStep = stepBlock(workflow, "Build and deploy to Cloudflare");
+
+        expect(deployStep).toContain(
+            "NEXT_PUBLIC_SONARI_GRAPHQL_URL: $" + "{{ vars.SONARI_SUI_GRAPHQL_URL }}",
+        );
+    });
+
     it("does not pass contract object ids from GitHub Variables to the dapp build", async () => {
         const workflow = await readWorkflow();
 

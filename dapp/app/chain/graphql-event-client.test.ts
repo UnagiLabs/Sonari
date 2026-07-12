@@ -38,6 +38,40 @@ describe("resolveGraphqlEventClientConfig", () => {
 });
 
 describe("createGraphqlEventClient", () => {
+    it("caps the GraphQL page size at 50", async () => {
+        const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body)) as {
+                variables: { last: number };
+            };
+            expect(body.variables.last).toBe(50);
+            return new Response(
+                JSON.stringify({
+                    data: {
+                        events: {
+                            nodes: [],
+                            pageInfo: { hasPreviousPage: false, startCursor: null },
+                        },
+                    },
+                }),
+            );
+        });
+        const client = createGraphqlEventClient({ network: "testnet", fetch: fetchMock });
+
+        await expect(
+            client.queryMoveEvents({ type: "0x1::module::Created", limit: 100 }),
+        ).resolves.toEqual({ data: [], hasNextPage: false, nextCursor: null });
+    });
+
+    it.each([0, -1, 1.5])("rejects an invalid page size: %s", async (limit) => {
+        const fetchMock = vi.fn();
+        const client = createGraphqlEventClient({ network: "testnet", fetch: fetchMock });
+
+        await expect(
+            client.queryMoveEvents({ type: "0x1::module::Created", limit }),
+        ).rejects.toThrow("GraphQL event query limit must be a positive integer");
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it("queries backward pages and normalizes each page in newest-first order", async () => {
         const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
             const body = JSON.parse(String(init?.body)) as {
