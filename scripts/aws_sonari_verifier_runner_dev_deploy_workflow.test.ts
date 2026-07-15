@@ -39,12 +39,11 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "workflow_dispatch:",
             "environment: aws-sonari-verifier-runner-dev",
             "group: aws-sonari-verifier-runner-dev-deploy",
-            "runs-on: [self-hosted, linux, x64, manji]",
+            "runs-on: ubuntu-latest",
         ]);
-        // Published.toml 更新時だけ main merge 後に manji self-hosted runner で dev deploy する。
-        // GitHub-hosted runner では AWS dev deploy しない。
+        // Published.toml 更新時だけ main merge 後に GitHub-hosted runner で dev deploy する。
         expect(workflow).not.toContain("pull_request:");
-        expect(workflow).not.toContain("ubuntu-latest");
+        expect(workflow).not.toContain("runs-on: [self-hosted");
         expect(workflow).not.toContain("aws-sonari-verifier-runner-prod");
     });
 
