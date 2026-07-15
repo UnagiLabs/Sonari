@@ -1,7 +1,20 @@
 import { appendFile, readFile } from "node:fs/promises";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import { SuiGraphQLClient } from "@mysten/sui/graphql";
 
 const QUERY_EVENTS_PAGE_LIMIT = 50;
+const EVENTS_QUERY = `
+    query MoveEvents($type: String!, $last: Int!, $before: String) {
+        events(filter: { type: $type }, last: $last, before: $before) {
+            nodes {
+                contents { json }
+            }
+            pageInfo {
+                hasPreviousPage
+                startCursor
+            }
+        }
+    }
+`;
 
 export const GENESIS_OBJECT_KIND = {
     adminCap: 1,
@@ -31,28 +44,21 @@ const GENESIS_OUTPUTS = [
     ["SONARI_CELL_COUNT_INDEX_ID", GENESIS_OBJECT_KIND.cellCountIndex],
 ] as const;
 
-export interface EventCursor {
-    readonly txDigest: string;
-    readonly eventSeq: string;
-}
-
-export interface QueryEventsClient {
-    queryEvents(input: {
-        readonly query: { readonly MoveEventType: string };
-        readonly cursor?: EventCursor | null;
-        readonly limit?: number;
-        readonly order?: "ascending" | "descending";
-    }): Promise<{
-        readonly data: readonly unknown[];
-        readonly hasNextPage?: boolean;
-        readonly nextCursor?: EventCursor | null;
-    }>;
+export interface GraphqlQueryClient {
+    query(input: {
+        readonly query: string;
+        readonly variables: {
+            readonly type: string;
+            readonly last: number;
+            readonly before: string | null;
+        };
+    }): Promise<unknown>;
 }
 
 export interface ResolvePublishedContractIdsInput {
     readonly publishedToml: string;
     readonly network: string;
-    readonly client: QueryEventsClient;
+    readonly client: GraphqlQueryClient;
 }
 
 export interface ResolvedPublishedContractIds {
@@ -139,7 +145,7 @@ export function parseRegistryCreatedEvent(raw: unknown, eventName: string): Regi
 }
 
 async function readGenesisObjects(
-    client: QueryEventsClient,
+    client: GraphqlQueryClient,
     packageId: string,
 ): Promise<ReadonlyMap<number, string>> {
     const records = await readMoveEvents(client, `${packageId}::admin::GenesisObjectCreated`);
@@ -154,7 +160,7 @@ async function readGenesisObjects(
 }
 
 async function readSingleRegistryCreatedEvent(
-    client: QueryEventsClient,
+    client: GraphqlQueryClient,
     eventType: string,
     eventName: string,
 ): Promise<string> {
@@ -173,31 +179,99 @@ async function readSingleRegistryCreatedEvent(
 }
 
 async function readMoveEvents(
-    client: QueryEventsClient,
+    client: GraphqlQueryClient,
     eventType: string,
 ): Promise<readonly unknown[]> {
     const records: unknown[] = [];
-    let cursor: EventCursor | null | undefined;
+    let cursor: string | null = null;
+    const seenCursors = new Set<string>();
     for (;;) {
-        const response = await client.queryEvents({
-            query: { MoveEventType: eventType },
-            ...(cursor !== undefined ? { cursor } : {}),
-            limit: QUERY_EVENTS_PAGE_LIMIT,
-            order: "descending",
+        const response = await client.query({
+            query: EVENTS_QUERY,
+            variables: {
+                type: eventType,
+                last: QUERY_EVENTS_PAGE_LIMIT,
+                before: cursor,
+            },
         });
-        records.push(...response.data);
-        if (response.hasNextPage !== true || response.nextCursor == null) {
+        const page = parseGraphqlEventPage(response);
+        records.push(...page.data);
+        if (!page.hasPreviousPage) {
             return records;
         }
-        cursor = response.nextCursor;
+        const nextCursor = page.startCursor;
+        if (nextCursor === null || seenCursors.has(nextCursor)) {
+            throw malformedGraphqlResponse();
+        }
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
     }
 }
 
-function readParsedJson(raw: unknown): Record<string, unknown> {
-    if (!isRecord(raw) || !isRecord(raw.parsedJson)) {
-        throw new Error("Sui event did not include parsedJson");
+function parseGraphqlEventPage(value: unknown): {
+    readonly data: readonly unknown[];
+    readonly hasPreviousPage: boolean;
+    readonly startCursor: string | null;
+} {
+    if (!isRecord(value)) {
+        throw malformedGraphqlResponse();
     }
-    return raw.parsedJson;
+    if (value.errors !== undefined) {
+        if (!Array.isArray(value.errors)) {
+            throw malformedGraphqlResponse();
+        }
+        if (value.errors.length > 0) {
+            const messages = value.errors.map((error) => {
+                if (!isRecord(error) || typeof error.message !== "string" || !error.message) {
+                    throw malformedGraphqlResponse();
+                }
+                return error.message;
+            });
+            throw new Error(`GraphQL event query failed: ${messages.join("; ")}`);
+        }
+    }
+    const events = isRecord(value.data) ? value.data.events : undefined;
+    const nodes = isRecord(events) ? events.nodes : undefined;
+    const pageInfo = isRecord(events) ? events.pageInfo : undefined;
+    if (!Array.isArray(nodes) || !isRecord(pageInfo)) {
+        throw malformedGraphqlResponse();
+    }
+    const hasPreviousPage = pageInfo.hasPreviousPage;
+    const startCursor = pageInfo.startCursor;
+    if (
+        typeof hasPreviousPage !== "boolean" ||
+        (startCursor !== null && typeof startCursor !== "string") ||
+        (hasPreviousPage && (typeof startCursor !== "string" || startCursor.length === 0))
+    ) {
+        throw malformedGraphqlResponse();
+    }
+    return {
+        data: nodes.map(parseGraphqlEventNode).reverse(),
+        hasPreviousPage,
+        startCursor,
+    };
+}
+
+function parseGraphqlEventNode(value: unknown): { readonly json: Record<string, unknown> } {
+    if (!isRecord(value)) {
+        throw malformedGraphqlResponse();
+    }
+    const contents = value.contents;
+    if (!isRecord(contents) || !isRecord(contents.json)) {
+        throw malformedGraphqlResponse();
+    }
+    return { json: contents.json };
+}
+
+function readParsedJson(raw: unknown): Record<string, unknown> {
+    if (!isRecord(raw) || !isRecord(raw.json)) {
+        throw new Error("Sui event did not include JSON contents");
+    }
+    return raw.json;
+}
+
+function malformedGraphqlResponse(): Error {
+    return new Error("Malformed GraphQL event response");
 }
 
 function normalizeNetwork(raw: string): string {
@@ -235,25 +309,25 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-function defaultRpcUrl(network: string): string {
+export function defaultGraphqlUrl(network: string): string {
     switch (normalizeNetwork(network)) {
         case "mainnet":
-            return "https://fullnode.mainnet.sui.io:443";
+            return "https://graphql.mainnet.sui.io/graphql";
         case "localnet":
-            return "http://127.0.0.1:9000";
+            return "http://127.0.0.1:9125/graphql";
         default:
-            return "https://fullnode.testnet.sui.io:443";
+            return "https://graphql.testnet.sui.io/graphql";
     }
 }
 
-function parseArgs(argv: readonly string[]): {
+export function parseResolverArgs(argv: readonly string[]): {
     readonly network: string;
     readonly publishedTomlPath: string;
-    readonly rpcUrl: string;
+    readonly graphqlUrl: string;
 } {
     let network = process.env.SONARI_SUI_NETWORK ?? "testnet";
     let publishedTomlPath = "contracts/Published.toml";
-    let rpcUrl = process.env.SUI_RPC_URL ?? "";
+    let graphqlUrl = process.env.SONARI_SUI_GRAPHQL_URL ?? "";
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
         const next = argv[i + 1];
@@ -267,8 +341,8 @@ function parseArgs(argv: readonly string[]): {
             i += 1;
             continue;
         }
-        if (arg === "--rpc-url" && next !== undefined) {
-            rpcUrl = next;
+        if (arg === "--graphql-url" && next !== undefined) {
+            graphqlUrl = next;
             i += 1;
             continue;
         }
@@ -277,17 +351,20 @@ function parseArgs(argv: readonly string[]): {
     return {
         network: normalizeNetwork(network),
         publishedTomlPath,
-        rpcUrl: rpcUrl.trim() || defaultRpcUrl(network),
+        graphqlUrl: graphqlUrl.trim() || defaultGraphqlUrl(network),
     };
 }
 
 async function runCli(): Promise<void> {
-    const args = parseArgs(process.argv.slice(2));
+    const args = parseResolverArgs(process.argv.slice(2));
     const publishedToml = await readFile(args.publishedTomlPath, "utf8");
+    const graphqlClient = new SuiGraphQLClient({ network: args.network, url: args.graphqlUrl });
     const result = await resolvePublishedContractIds({
         publishedToml,
         network: args.network,
-        client: new SuiJsonRpcClient({ network: args.network, url: args.rpcUrl }),
+        client: {
+            query: async (input) => graphqlClient.query(input),
+        },
     });
     const lines = Object.entries(result.env)
         .sort(([left], [right]) => left.localeCompare(right))

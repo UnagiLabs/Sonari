@@ -38,6 +38,10 @@ describe("Sonari contract republish bootstrap workflow", () => {
 
         expect(workflow).toContain("Resolve Sonari contract ids from Published.toml");
         expect(workflow).toContain("scripts/resolve_published_contract_ids.ts");
+        expect(workflow).toContain(
+            "SONARI_SUI_GRAPHQL_URL: $" + "{{ vars.SONARI_SUI_GRAPHQL_URL }}",
+        );
+        expect(workflow).toContain('resolver_args+=(--graphql-url "$SONARI_SUI_GRAPHQL_URL")');
         expect(workflow).toContain('--network "testnet"');
         expect(workflow).toContain("SONARI_RESIDENCE_ROOT: $" + "{{ vars.SONARI_RESIDENCE_ROOT }}");
         expect(workflow).toContain(

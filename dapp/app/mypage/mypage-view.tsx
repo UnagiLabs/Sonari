@@ -11,7 +11,7 @@ import { useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-ki
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { resolveMembershipDappGenesisObjects } from "../chain/genesis-objects";
-import { createJsonRpcEventClient } from "../chain/json-rpc-event-client";
+import { createGraphqlEventClient } from "../chain/graphql-event-client";
 import { LoadingIndicator } from "../components/loading-indicator";
 import type { SonariLocale } from "../register/wizard/locale";
 import { shortAddress } from "../register/wizard/steps/membership-presence";
@@ -158,7 +158,7 @@ export function MypageView({
         }
         let cancelled = false;
         setGenesisObjects({ kind: "loading" });
-        resolveMembershipDappGenesisObjects(createJsonRpcEventClient(), {
+        resolveMembershipDappGenesisObjects(createGraphqlEventClient(), {
             packageId: membershipPackageId,
         })
             .then((resolved) => {

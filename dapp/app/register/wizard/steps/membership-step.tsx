@@ -13,7 +13,7 @@ import {
     type MembershipDappGenesisObjects,
     resolveMembershipDappGenesisObjects,
 } from "../../../chain/genesis-objects";
-import { createJsonRpcEventClient } from "../../../chain/json-rpc-event-client";
+import { createGraphqlEventClient } from "../../../chain/graphql-event-client";
 import { LoadingIndicator } from "../../../components/loading-indicator";
 import { dAppKit } from "../../../wallet/dapp-kit";
 import {
@@ -215,7 +215,7 @@ export function MembershipStep({
         let cancelled = false;
         setGenesisObjects({ kind: "loading" });
 
-        void resolveMembershipDappGenesisObjects(createJsonRpcEventClient(), {
+        void resolveMembershipDappGenesisObjects(createGraphqlEventClient(), {
             packageId: membershipPackageId,
         }).then((result) => {
             if (cancelled) {

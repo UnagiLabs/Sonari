@@ -17,7 +17,9 @@ source archiver を有効にする dev stack では、次の Actions variables �
 
 `SOURCE_ARCHIVER_TOKEN_SECRET_ARN` は RunnerControl と archiver Lambda が共有する呼び出し token です。Function URL はこの token header がない request を拒否します。
 
-`SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN` は SourceArchiver 専用 hot wallet の raw ED25519 `suiprivkey...` だけを含む secret を指します。JSON、YAML、Sui wallet config、keystore JSON は受け付けません。SourceArchiver は `@mysten/walrus` SDK で `WALRUS_UPLOAD_RELAY_URL` に upload relay 書き込みを行い、既定値は `SUI_NETWORK=testnet`、`SUI_RPC_URL=https://fullnode.testnet.sui.io:443`、`WALRUS_UPLOAD_RELAY_URL=https://upload-relay.testnet.walrus.space`、`WALRUS_UPLOAD_RELAY_TIP_MAX_MIST=1000`、`WALRUS_EPOCHS=1`、`WALRUS_DELETABLE=false` です。secret 本文と private key はログへ出しません。
+`SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN` は SourceArchiver 専用 hot wallet の raw ED25519 `suiprivkey...` だけを含む secret を指します。JSON、YAML、Sui wallet config、keystore JSON は受け付けません。SourceArchiver は `@mysten/walrus` SDK で `WALRUS_UPLOAD_RELAY_URL` に upload relay 書き込みを行い、既定値は `SUI_NETWORK=testnet`、`SUI_GRPC_URL=https://fullnode.testnet.sui.io:443`、`WALRUS_UPLOAD_RELAY_URL=https://upload-relay.testnet.walrus.space`、`WALRUS_UPLOAD_RELAY_TIP_MAX_MIST=1000`、`WALRUS_EPOCHS=1`、`WALRUS_DELETABLE=false` です。secret 本文と private key はログへ出しません。
+
+SourceArchiver の Sui gRPC endpoint を上書きする場合は deploy plan の `--source-archiver-sui-grpc-url` を使い、CloudFormation parameter `SourceArchiverSuiGrpcUrl` から Lambda の `SUI_GRPC_URL` へ渡します。
 
 SourceArchiver Lambda は Walrus CLI layer を使いません。TEE 内の deterministic blob-id 計算用 Walrus CLI は維持しますが、Lambda upload path は SDK のみです。TEE と runner EC2 には Walrus wallet、config、store 用 secret を置きません。
 

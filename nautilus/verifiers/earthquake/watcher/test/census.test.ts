@@ -10,7 +10,6 @@ import {
     type FloorCensusOnchainReader,
     type FloorCensusSubmitClient,
     GraphqlFloorCensusReader,
-    JsonRpcFloorCensusReader,
     parseFloorCensusTeeOutput,
     signFloorCensusResult,
     TeeFloorCensusAdapter,
@@ -262,65 +261,6 @@ describe("floor census core", () => {
                 public_key: `0x${"22".repeat(32)}`,
             }),
         ).toThrow("registered_members_by_band");
-    });
-});
-
-describe("JsonRpcFloorCensusReader", () => {
-    it("retries a rate-limited event page request and uses the Sui page limit", async () => {
-        const requests: unknown[] = [];
-        globalThis.fetch = async (_input, init) => {
-            requests.push(JSON.parse(String(init?.body)));
-            if (requests.length === 1) {
-                return jsonResponse({}, { status: 429, headers: { "retry-after": "0" } });
-            }
-            return jsonResponse({
-                result: {
-                    data: [
-                        {
-                            parsedJson: {
-                                lineage: "0xlineage1",
-                                home_cell: "10",
-                                registered_at: 900,
-                            },
-                        },
-                    ],
-                    nextCursor: null,
-                    hasNextPage: false,
-                },
-            });
-        };
-
-        const reader = new JsonRpcFloorCensusReader("https://rpc.example");
-        const events = await reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" });
-
-        expect(events).toEqual([
-            { lineage: "0xlineage1", homeCell: "10", registeredAtMs: 900 },
-        ]);
-        expect(requests).toHaveLength(2);
-        expect(requests).toEqual([
-            expect.objectContaining({
-                method: "suix_queryEvents",
-                params: [{ MoveEventType: "0xpackage::membership::HomeCellRegistered" }, null, 50, false],
-            }),
-            expect.objectContaining({
-                method: "suix_queryEvents",
-                params: [{ MoveEventType: "0xpackage::membership::HomeCellRegistered" }, null, 50, false],
-            }),
-        ]);
-    });
-
-    it("does not retry non-rate-limited client errors", async () => {
-        let requests = 0;
-        globalThis.fetch = async () => {
-            requests += 1;
-            return jsonResponse({}, { status: 400 });
-        };
-
-        const reader = new JsonRpcFloorCensusReader("https://rpc.example");
-        await expect(reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" })).rejects.toThrow(
-            "Sui RPC suix_queryEvents failed with HTTP 400",
-        );
-        expect(requests).toBe(1);
     });
 });
 

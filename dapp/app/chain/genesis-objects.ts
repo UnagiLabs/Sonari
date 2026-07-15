@@ -6,6 +6,8 @@
 // dapp はこのイベントを 1 回照会するだけで、ObjectID を packageID から導出できる。
 // これにより、publish のたびに ObjectID を環境変数へ手登録する運用を不要にする。
 
+import type { MoveEventQueryClient } from "./graphql-event-client";
+
 const QUERY_EVENTS_PAGE_LIMIT = 50;
 
 // object_kind は admin.move の GENESIS_KIND_* 定数と一致させる cross-language contract。
@@ -25,25 +27,7 @@ export const GENESIS_OBJECT_KIND = {
     cellCountIndex: 14,
 } as const;
 
-export interface GenesisEventCursor {
-    readonly txDigest: string;
-    readonly eventSeq: string;
-}
-
-export interface GenesisObjectQueryClient {
-    queryEvents(input: {
-        readonly query: {
-            readonly MoveEventType: string;
-        };
-        readonly cursor?: GenesisEventCursor | null;
-        readonly limit?: number;
-        readonly order?: "ascending" | "descending";
-    }): Promise<{
-        readonly data: readonly unknown[];
-        readonly hasNextPage?: boolean;
-        readonly nextCursor?: GenesisEventCursor | null;
-    }>;
-}
+export type GenesisObjectQueryClient = MoveEventQueryClient;
 
 export interface GenesisObjectRecord {
     readonly objectId: string;
@@ -104,17 +88,16 @@ export async function readGenesisObjectIds(
     // 通常は publish が 1 回なので各 kind は 1 件だが、念のため最新を選ぶ。
     const latest = new Map<number, GenesisObjectRecord>();
     try {
-        let cursor: GenesisEventCursor | null | undefined;
+        let cursor: string | null | undefined;
         for (;;) {
-            const response = await client.queryEvents({
-                query: { MoveEventType: `${packageId}::admin::GenesisObjectCreated` },
+            const response = await client.queryMoveEvents({
+                type: `${packageId}::admin::GenesisObjectCreated`,
                 ...(cursor !== undefined ? { cursor } : {}),
                 limit: QUERY_EVENTS_PAGE_LIMIT,
-                order: "descending",
             });
 
             for (const item of response.data) {
-                const record = parseGenesisObjectCreatedEvent(readParsedJson(item));
+                const record = parseGenesisObjectCreatedEvent(item.json);
                 if (record === null) {
                     continue;
                 }
@@ -154,10 +137,10 @@ export async function resolveMembershipDappGenesisObjects(
     client: unknown,
     input: { readonly packageId: string },
 ): Promise<MembershipDappGenesisObjectsResult> {
-    if (!hasQueryEvents(client)) {
+    if (!hasQueryMoveEvents(client)) {
         return {
             kind: "error",
-            message: "A queryEvents-capable Sui client is required to resolve genesis objects.",
+            message: "A Move event query client is required to resolve genesis objects.",
         };
     }
 
@@ -184,15 +167,8 @@ export async function resolveMembershipDappGenesisObjects(
     };
 }
 
-function hasQueryEvents(client: unknown): client is GenesisObjectQueryClient {
-    return isRecord(client) && typeof client.queryEvents === "function";
-}
-
-function readParsedJson(value: unknown): unknown {
-    if (!isRecord(value)) {
-        return undefined;
-    }
-    return value.parsedJson;
+function hasQueryMoveEvents(client: unknown): client is GenesisObjectQueryClient {
+    return isRecord(client) && typeof client.queryMoveEvents === "function";
 }
 
 function parseObjectId(raw: unknown): string | null {

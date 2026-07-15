@@ -10,7 +10,7 @@ const MEMBERSHIP_EIF_FILE_NAME = "membership-identity-tee.eif";
 const CENSUS_TEE_ARTIFACT_FILE_NAME = "census-tee-artifact.tar.gz";
 const CENSUS_EIF_FILE_NAME = "census-tee.eif";
 const DEFAULT_SOURCE_ARCHIVER_SUI_NETWORK = "testnet";
-const DEFAULT_SOURCE_ARCHIVER_SUI_RPC_URL = "https://fullnode.testnet.sui.io:443";
+const DEFAULT_SOURCE_ARCHIVER_SUI_GRPC_URL = "https://fullnode.testnet.sui.io:443";
 const DEFAULT_SOURCE_ARCHIVER_WALRUS_UPLOAD_RELAY_URL = "https://upload-relay.testnet.walrus.space";
 const DEFAULT_SOURCE_ARCHIVER_WALRUS_UPLOAD_RELAY_TIP_MAX_MIST = "1000";
 const DEFAULT_SOURCE_ARCHIVER_WALRUS_EPOCHS = "1";
@@ -58,7 +58,7 @@ const DEPLOY_PARAMETER_KEYS = [
     "SourceArchiverTokenSecretArn",
     "SourceArchiverPrivateKeySecretArn",
     "SourceArchiverSuiNetwork",
-    "SourceArchiverSuiRpcUrl",
+    "SourceArchiverSuiGrpcUrl",
     "SourceArchiverWalrusUploadRelayUrl",
     "SourceArchiverWalrusUploadRelayTipMaxMist",
     "SourceArchiverWalrusEpochs",
@@ -98,7 +98,7 @@ export type BuildAwsSonariVerifierRunnerDeployPlanInput = {
     sourceArchiverTokenSecretArn: string;
     sourceArchiverPrivateKeySecretArn: string;
     sourceArchiverSuiNetwork?: SourceArchiverSuiNetwork;
-    sourceArchiverSuiRpcUrl?: string;
+    sourceArchiverSuiGrpcUrl?: string;
     sourceArchiverWalrusUploadRelayUrl?: string;
     sourceArchiverWalrusUploadRelayTipMaxMist?: number;
     sourceArchiverWalrusEpochs?: number;
@@ -198,9 +198,9 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
         ),
         SourceArchiverSuiNetwork:
             input.sourceArchiverSuiNetwork ?? DEFAULT_SOURCE_ARCHIVER_SUI_NETWORK,
-        SourceArchiverSuiRpcUrl: validateHttpsUrl(
-            input.sourceArchiverSuiRpcUrl ?? DEFAULT_SOURCE_ARCHIVER_SUI_RPC_URL,
-            "source archiver Sui RPC URL",
+        SourceArchiverSuiGrpcUrl: validateHttpsUrl(
+            input.sourceArchiverSuiGrpcUrl ?? DEFAULT_SOURCE_ARCHIVER_SUI_GRPC_URL,
+            "source archiver Sui gRPC URL",
         ),
         SourceArchiverWalrusUploadRelayUrl: validateHttpsUrl(
             input.sourceArchiverWalrusUploadRelayUrl ??
@@ -407,7 +407,7 @@ type CliOptions = {
     sourceArchiverTokenSecretArn?: string;
     sourceArchiverPrivateKeySecretArn?: string;
     sourceArchiverSuiNetwork?: SourceArchiverSuiNetwork;
-    sourceArchiverSuiRpcUrl?: string;
+    sourceArchiverSuiGrpcUrl?: string;
     sourceArchiverWalrusUploadRelayUrl?: string;
     sourceArchiverWalrusUploadRelayTipMaxMist?: number;
     sourceArchiverWalrusEpochs?: number;
@@ -477,7 +477,7 @@ async function main(): Promise<void> {
                 "--source-archiver-token-secret-arn <arn>",
                 "--source-archiver-private-key-secret-arn <arn>",
                 "[--source-archiver-sui-network <mainnet|testnet>]",
-                "[--source-archiver-sui-rpc-url <url>]",
+                "[--source-archiver-sui-grpc-url <url>]",
                 "[--source-archiver-walrus-upload-relay-url <url>]",
                 "[--source-archiver-walrus-upload-relay-tip-max-mist <mist>]",
                 "[--source-archiver-walrus-epochs <epochs>]",
@@ -523,9 +523,9 @@ async function main(): Promise<void> {
         ...(options.sourceArchiverSuiNetwork === undefined
             ? {}
             : { sourceArchiverSuiNetwork: options.sourceArchiverSuiNetwork }),
-        ...(options.sourceArchiverSuiRpcUrl === undefined
+        ...(options.sourceArchiverSuiGrpcUrl === undefined
             ? {}
-            : { sourceArchiverSuiRpcUrl: options.sourceArchiverSuiRpcUrl }),
+            : { sourceArchiverSuiGrpcUrl: options.sourceArchiverSuiGrpcUrl }),
         ...(options.sourceArchiverWalrusUploadRelayUrl === undefined
             ? {}
             : { sourceArchiverWalrusUploadRelayUrl: options.sourceArchiverWalrusUploadRelayUrl }),
@@ -652,8 +652,8 @@ function parseArgs(args: string[]): CliOptions {
             case "--source-archiver-sui-network":
                 options.sourceArchiverSuiNetwork = parseSourceArchiverSuiNetwork(next);
                 break;
-            case "--source-archiver-sui-rpc-url":
-                options.sourceArchiverSuiRpcUrl = next;
+            case "--source-archiver-sui-grpc-url":
+                options.sourceArchiverSuiGrpcUrl = next;
                 break;
             case "--source-archiver-walrus-upload-relay-url":
                 options.sourceArchiverWalrusUploadRelayUrl = next;

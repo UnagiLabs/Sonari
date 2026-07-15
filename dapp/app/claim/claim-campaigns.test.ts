@@ -1,7 +1,6 @@
 import { toBase64 } from "@mysten/sui/utils";
 import { describe, expect, it, vi } from "vitest";
 import {
-    type ClaimCampaignEventCursor,
     type ClaimCampaignReadClient,
     deriveClaimCampaignState,
     deriveClaimEligibility,
@@ -12,6 +11,7 @@ import {
     readClaimEligibility,
     readClaimCampaigns,
 } from "./claim-campaigns";
+import type { MoveEvent } from "../chain/graphql-event-client";
 
 const PACKAGE_ID = `0x${"ab".repeat(32)}`;
 const CAMPAIGN_TYPE = `${PACKAGE_ID}::campaign::CampaignCreated`;
@@ -33,6 +33,10 @@ function campaignCreatedParsedJson(
         claim_end_ms: "2000",
         ...overrides,
     };
+}
+
+function moveEvent(json: Record<string, unknown>, id = "digest:0"): MoveEvent {
+    return { id, timestampMs: 1_700_000_000_000, json };
 }
 
 function campaignObjectJson(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -110,7 +114,7 @@ describe("claim campaign parsing", () => {
     });
 
     it("parses base64-encoded event_uid and affected_cells_root from gRPC into 0x hex", () => {
-        // SuiGrpcClient は vector<u8> / [u8; 32] を base64 文字列で返す（JSON-RPC は数値配列）。
+        // SuiGrpcClient は vector<u8> / [u8; 32] を base64 文字列で返す。
         // base64 を扱えないと event_uid が null になり Campaign / DisasterEvent ごと脱落して
         // 一覧が常に空になる（#461 実機バグ）。base64 でも 0x hex へ復元できることを保証する。
         const bytes = Uint8Array.from({ length: 32 }, (_, index) => index);
@@ -487,22 +491,23 @@ describe("deriveClaimEligibility", () => {
 
 describe("readClaimCampaigns", () => {
     it("queries CampaignCreated events, follows pages, dedupes, and reads objects", async () => {
-        const nextCursor: ClaimCampaignEventCursor = { txDigest: "digest", eventSeq: "1" };
-        const queryEvents = vi.fn(async (input: {
-            query: { MoveEventType: string };
-            cursor?: ClaimCampaignEventCursor | null;
+        const nextCursor = "next-page";
+        const queryMoveEvents = vi.fn(async (input: {
+            type: string;
+            cursor?: string | null;
         }) => {
-            expect(input.query.MoveEventType).toBe(CAMPAIGN_TYPE);
+            expect(input.type).toBe(CAMPAIGN_TYPE);
             if (input.cursor === nextCursor) {
                 return {
-                    data: [{ parsedJson: campaignCreatedParsedJson({ claim_end_ms: "1000" }) }],
+                    data: [moveEvent(campaignCreatedParsedJson({ claim_end_ms: "1000" }), "digest:1")],
                     hasNextPage: false,
+                    nextCursor: null,
                 };
             }
             return {
                 data: [
-                    { parsedJson: campaignCreatedParsedJson() },
-                    { parsedJson: campaignCreatedParsedJson() },
+                    moveEvent(campaignCreatedParsedJson()),
+                    moveEvent(campaignCreatedParsedJson()),
                 ],
                 hasNextPage: true,
                 nextCursor,
@@ -517,7 +522,7 @@ describe("readClaimCampaigns", () => {
                         : disasterEventObjectJson(),
             })),
         }));
-        const client: ClaimCampaignReadClient = { queryEvents, getObjects };
+        const client: ClaimCampaignReadClient = { queryMoveEvents, getObjects };
 
         const result = await readClaimCampaigns(client, {
             packageId: PACKAGE_ID,
@@ -530,13 +535,13 @@ describe("readClaimCampaigns", () => {
         }
         expect(result.campaigns).toHaveLength(1);
         expect(result.campaigns[0]?.campaignId).toBe(CAMPAIGN_ID);
-        expect(queryEvents).toHaveBeenCalledTimes(2);
+        expect(queryMoveEvents).toHaveBeenCalledTimes(2);
         expect(getObjects).toHaveBeenCalledTimes(2);
     });
 
     it("returns error when the package id is missing or RPC fails", async () => {
         const client: ClaimCampaignReadClient = {
-            queryEvents: vi.fn(async () => {
+            queryMoveEvents: vi.fn(async () => {
                 throw new Error("rpc unavailable");
             }),
             getObjects: vi.fn(),
@@ -565,7 +570,7 @@ describe("readClaimEligibility", () => {
             })
             .mockResolvedValueOnce({ objects: [] });
         const client: ClaimCampaignReadClient = {
-            queryEvents: vi.fn(),
+            queryMoveEvents: vi.fn(),
             getObjects,
         };
 

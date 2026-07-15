@@ -233,7 +233,7 @@ describe("source archiver Walrus store", () => {
         expect(sdk.creates).toEqual([
             {
                 suiNetwork: "testnet",
-                suiRpcUrl: "https://fullnode.testnet.sui.io:443",
+                suiGrpcUrl: "https://fullnode.testnet.sui.io:443",
                 uploadRelayUrl: "https://upload-relay.testnet.walrus.space",
                 uploadRelayTipMaxMist: 1_000,
             },
@@ -249,7 +249,7 @@ describe("source archiver Walrus store", () => {
             expect.objectContaining({
                 event: "source_archiver.walrus_store.start",
                 suiNetwork: "testnet",
-                suiRpcUrl: "https://fullnode.testnet.sui.io:443",
+                suiGrpcUrl: "https://fullnode.testnet.sui.io:443",
                 uploadRelayUrl: "https://upload-relay.testnet.walrus.space",
                 uploadRelayTipMaxMist: 1_000,
                 epochs: 1,
@@ -273,7 +273,7 @@ describe("source archiver Walrus store", () => {
         expect(JSON.stringify(logger.events)).not.toContain(privateKey);
     });
 
-    it("passes explicit SDK network, RPC, relay, tip cap, epochs, and deletable config", async () => {
+    it("passes explicit SDK network, gRPC, relay, tip cap, epochs, and deletable config", async () => {
         const sdk = new RecordingWalrusSdkClientFactory({
             blobId: "testBlob_123456",
             blobObjectId: validBlobObjectId,
@@ -282,7 +282,7 @@ describe("source archiver Walrus store", () => {
             {
                 suiPrivateKey: Ed25519Keypair.generate().getSecretKey(),
                 suiNetwork: "mainnet",
-                suiRpcUrl: "https://fullnode.mainnet.sui.io:443",
+                suiGrpcUrl: "https://fullnode.mainnet.sui.io:443",
                 uploadRelayUrl: "https://upload-relay.mainnet.walrus.space/",
                 uploadRelayTipMaxMist: 2_000,
                 epochs: 3,
@@ -298,7 +298,7 @@ describe("source archiver Walrus store", () => {
         expect(sdk.creates).toEqual([
             {
                 suiNetwork: "mainnet",
-                suiRpcUrl: "https://fullnode.mainnet.sui.io:443",
+                suiGrpcUrl: "https://fullnode.mainnet.sui.io:443",
                 uploadRelayUrl: "https://upload-relay.mainnet.walrus.space",
                 uploadRelayTipMaxMist: 2_000,
             },
@@ -314,7 +314,7 @@ describe("source archiver Walrus store", () => {
         const privateKey = Ed25519Keypair.generate().getSecretKey();
         const cases: Array<Partial<WalrusSdkStoreConfig>> = [
             { suiNetwork: "devnet" as WalrusSdkStoreConfig["suiNetwork"] },
-            { suiRpcUrl: "http://fullnode.testnet.sui.io:443" },
+            { suiGrpcUrl: "http://fullnode.testnet.sui.io:443" },
             { uploadRelayUrl: "ftp://upload-relay.testnet.walrus.space" },
             { uploadRelayTipMaxMist: -1 },
             { epochs: 0 },
@@ -593,7 +593,7 @@ class RecordingWalrusStoreRunner implements WalrusStoreRunner {
 class RecordingWalrusSdkClientFactory implements WalrusSdkStoreClientFactory {
     readonly creates: Array<{
         suiNetwork: "mainnet" | "testnet";
-        suiRpcUrl: string;
+        suiGrpcUrl: string;
         uploadRelayUrl: string;
         uploadRelayTipMaxMist: number;
     }> = [];
@@ -616,7 +616,7 @@ class RecordingWalrusSdkClientFactory implements WalrusSdkStoreClientFactory {
 
     create(input: {
         suiNetwork: "mainnet" | "testnet";
-        suiRpcUrl: string;
+        suiGrpcUrl: string;
         uploadRelayUrl: string;
         uploadRelayTipMaxMist: number;
     }): WalrusSdkStoreClient {

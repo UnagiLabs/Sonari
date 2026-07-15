@@ -282,7 +282,7 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 `SourceArchiverTokenSecretArn=${validInput.sourceArchiverTokenSecretArn}`,
                 `SourceArchiverPrivateKeySecretArn=${validInput.sourceArchiverPrivateKeySecretArn}`,
                 "SourceArchiverSuiNetwork=testnet",
-                "SourceArchiverSuiRpcUrl=https://fullnode.testnet.sui.io:443",
+                "SourceArchiverSuiGrpcUrl=https://fullnode.testnet.sui.io:443",
                 "SourceArchiverWalrusUploadRelayUrl=https://upload-relay.testnet.walrus.space",
                 "SourceArchiverWalrusUploadRelayTipMaxMist=1000",
                 "SourceArchiverWalrusEpochs=1",
@@ -306,6 +306,20 @@ describe("AWS Sonari verifier runner deploy plan", () => {
 
         expect(plan.parameterOverrides.NitroEnclaveMemoryMiB).toBe("8192");
         expect(plan.parameterOverrideArgs).toContain("NitroEnclaveMemoryMiB=8192");
+    });
+
+    it("honors an explicit SourceArchiver Sui gRPC URL override", () => {
+        const plan = buildAwsSonariVerifierRunnerDeployPlan({
+            ...validInput,
+            sourceArchiverSuiGrpcUrl: "https://grpc.example.test:443",
+        });
+
+        expect(plan.parameterOverrides.SourceArchiverSuiGrpcUrl).toBe(
+            "https://grpc.example.test:443",
+        );
+        expect(plan.parameterOverrideArgs).toContain(
+            "SourceArchiverSuiGrpcUrl=https://grpc.example.test:443",
+        );
     });
 
     it("overrides ScheduleExpression with the fixed JST cron default so the watcher runs at 00:00/12:00", () => {

@@ -50,12 +50,24 @@ describe("dapp deploy workflow", () => {
         expect(workflow).toContain("Resolve Sonari contract ids from Published.toml");
         expect(workflow).toContain("scripts/resolve_published_contract_ids.ts");
         expect(workflow).toContain("SONARI_SUI_NETWORK: $" + "{{ vars.SONARI_SUI_NETWORK }}");
-        expect(workflow).toContain("SUI_RPC_URL: $" + "{{ vars.SONARI_SUI_RPC_URL }}");
+        expect(workflow).toContain(
+            "SONARI_SUI_GRAPHQL_URL: $" + "{{ vars.SONARI_SUI_GRAPHQL_URL }}",
+        );
+        expect(workflow).toContain('resolver_args+=(--graphql-url "$SONARI_SUI_GRAPHQL_URL")');
 
         const resolverIndex = workflow.indexOf("Resolve Sonari contract ids from Published.toml");
         const deployIndex = workflow.indexOf("Build and deploy to Cloudflare");
         expect(resolverIndex).toBeGreaterThan(-1);
         expect(deployIndex).toBeGreaterThan(resolverIndex);
+    });
+
+    it("passes the GraphQL URL to the dapp build", async () => {
+        const workflow = await readWorkflow();
+        const deployStep = stepBlock(workflow, "Build and deploy to Cloudflare");
+
+        expect(deployStep).toContain(
+            "NEXT_PUBLIC_SONARI_GRAPHQL_URL: $" + "{{ vars.SONARI_SUI_GRAPHQL_URL }}",
+        );
     });
 
     it("does not pass contract object ids from GitHub Variables to the dapp build", async () => {

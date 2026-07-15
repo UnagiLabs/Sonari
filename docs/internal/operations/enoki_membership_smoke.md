@@ -65,7 +65,7 @@ shell env の key は smoke 後に `unset ENOKI_PRIVATE_API_KEY` で消します
 - `NEXT_PUBLIC_ENOKI_API_KEY`
 - `NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID`
 - `SONARI_SUI_NETWORK`
-- 必要に応じて `SONARI_SUI_RPC_URL`
+- resolver の GraphQL endpoint を上書きする場合は `SONARI_SUI_GRAPHQL_URL`
 
 `cloudflare-dapp-worker` の Environment Secrets を確認します。
 

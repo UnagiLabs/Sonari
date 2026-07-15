@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+    defaultGraphqlUrl,
     GENESIS_OBJECT_KIND,
+    type GraphqlQueryClient,
     parseGenesisObjectCreatedEvent,
-    type QueryEventsClient,
+    parseResolverArgs,
     readPublishedPackageId,
     resolvePublishedContractIds,
 } from "./resolve_published_contract_ids.js";
@@ -35,14 +37,16 @@ published-at = "${PACKAGE_ID}"
 published-at = "${objectId("bb")}"
 `;
 
+afterEach(() => {
+    vi.unstubAllEnvs();
+});
+
 function objectId(byte: string): string {
     return `0x${byte.repeat(32)}`;
 }
 
-function event(parsedJson: Record<string, unknown>): {
-    readonly parsedJson: Record<string, unknown>;
-} {
-    return { parsedJson };
+function event(json: Record<string, unknown>): unknown {
+    return { contents: { json } };
 }
 
 function genesisEvent(objectKind: number, objectIdValue: string) {
@@ -65,36 +69,44 @@ function registryEvent(registryId: string) {
 
 function clientWithEvents(
     eventsByType: Readonly<Record<string, readonly unknown[]>>,
-): QueryEventsClient {
+): GraphqlQueryClient {
     return {
-        queryEvents: vi.fn(async ({ query }) => ({
-            data: eventsByType[query.MoveEventType] ?? [],
-            hasNextPage: false,
+        query: vi.fn(async ({ variables }) => ({
+            data: {
+                events: {
+                    nodes: eventsByType[variables.type] ?? [],
+                    pageInfo: { hasPreviousPage: false, startCursor: null },
+                },
+            },
         })),
     };
 }
 
-function validClient(): QueryEventsClient {
+function validClient(): GraphqlQueryClient {
     return clientWithEvents({
-        [`${PACKAGE_ID}::admin::GenesisObjectCreated`]: [
-            genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
-            genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
-            genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
-            genesisEvent(GENESIS_OBJECT_KIND.membershipRegistry, MEMBERSHIP_REGISTRY_ID),
-            genesisEvent(GENESIS_OBJECT_KIND.verifierRegistry, VERIFIER_REGISTRY_ID),
-            genesisEvent(GENESIS_OBJECT_KIND.identityRegistry, IDENTITY_REGISTRY_ID),
-            genesisEvent(GENESIS_OBJECT_KIND.categoryRegistry, CATEGORY_REGISTRY_ID),
-            genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
-            genesisEvent(
-                GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
-                ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
-            ),
-            genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
-        ],
+        [`${PACKAGE_ID}::admin::GenesisObjectCreated`]: genesisEvents(),
         [`${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`]: [
             registryEvent(DISASTER_REGISTRY_ID),
         ],
     });
+}
+
+function genesisEvents(): readonly unknown[] {
+    return [
+        genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
+        genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
+        genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
+        genesisEvent(GENESIS_OBJECT_KIND.membershipRegistry, MEMBERSHIP_REGISTRY_ID),
+        genesisEvent(GENESIS_OBJECT_KIND.verifierRegistry, VERIFIER_REGISTRY_ID),
+        genesisEvent(GENESIS_OBJECT_KIND.identityRegistry, IDENTITY_REGISTRY_ID),
+        genesisEvent(GENESIS_OBJECT_KIND.categoryRegistry, CATEGORY_REGISTRY_ID),
+        genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
+        genesisEvent(
+            GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
+            ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
+        ),
+        genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
+    ];
 }
 
 describe("readPublishedPackageId", () => {
@@ -113,6 +125,48 @@ describe("readPublishedPackageId", () => {
     });
 });
 
+describe("defaultGraphqlUrl", () => {
+    it.each([
+        ["mainnet", "https://graphql.mainnet.sui.io/graphql"],
+        ["testnet", "https://graphql.testnet.sui.io/graphql"],
+        ["localnet", "http://127.0.0.1:9125/graphql"],
+    ])("uses the %s GraphQL endpoint", (network, expected) => {
+        expect(defaultGraphqlUrl(network)).toBe(expected);
+    });
+});
+
+describe("parseResolverArgs", () => {
+    it("uses the GraphQL URL environment override", () => {
+        vi.stubEnv("SONARI_SUI_NETWORK", "mainnet");
+        vi.stubEnv("SONARI_SUI_GRAPHQL_URL", " https://graphql.env.test/query ");
+
+        expect(parseResolverArgs([])).toEqual({
+            network: "mainnet",
+            publishedTomlPath: "contracts/Published.toml",
+            graphqlUrl: "https://graphql.env.test/query",
+        });
+    });
+
+    it("gives explicit GraphQL arguments precedence", () => {
+        vi.stubEnv("SONARI_SUI_GRAPHQL_URL", "https://graphql.env.test/query");
+
+        expect(
+            parseResolverArgs([
+                "--network",
+                "localnet",
+                "--published-toml",
+                "custom/Published.toml",
+                "--graphql-url",
+                "https://graphql.cli.test/query",
+            ]),
+        ).toEqual({
+            network: "localnet",
+            publishedTomlPath: "custom/Published.toml",
+            graphqlUrl: "https://graphql.cli.test/query",
+        });
+    });
+});
+
 describe("parseGenesisObjectCreatedEvent", () => {
     it("keeps the genesis object kind contract for dapp object resolution", () => {
         expect(GENESIS_OBJECT_KIND.allowedResidenceCellRegistry).toBe(13);
@@ -120,7 +174,9 @@ describe("parseGenesisObjectCreatedEvent", () => {
     });
 
     it("parses the object kind and object id", () => {
-        expect(parseGenesisObjectCreatedEvent(genesisEvent(1, ADMIN_CAP_ID))).toEqual({
+        expect(
+            parseGenesisObjectCreatedEvent({ json: { object_id: ADMIN_CAP_ID, object_kind: 1 } }),
+        ).toEqual({
             objectId: ADMIN_CAP_ID,
             objectKind: 1,
         });
@@ -128,10 +184,10 @@ describe("parseGenesisObjectCreatedEvent", () => {
 
     it("fails closed for malformed genesis events", () => {
         expect(() =>
-            parseGenesisObjectCreatedEvent(event({ object_id: "bad", object_kind: 1 })),
+            parseGenesisObjectCreatedEvent({ json: { object_id: "bad", object_kind: 1 } }),
         ).toThrow("GenesisObjectCreated event is malformed");
-        expect(() => parseGenesisObjectCreatedEvent({ parsedJson: null })).toThrow(
-            "Sui event did not include parsedJson",
+        expect(() => parseGenesisObjectCreatedEvent({ json: null })).toThrow(
+            "Sui event did not include JSON contents",
         );
     });
 });
@@ -176,31 +232,10 @@ describe("resolvePublishedContractIds", () => {
     });
 
     it("fails closed when DisasterRegistryCreated is absent or ambiguous", async () => {
-        const absentClient = validClient();
-        vi.mocked(absentClient.queryEvents).mockImplementation(async ({ query }) => ({
-            data:
-                query.MoveEventType === `${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`
-                    ? []
-                    : [
-                          genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
-                          genesisEvent(
-                              GENESIS_OBJECT_KIND.membershipRegistry,
-                              MEMBERSHIP_REGISTRY_ID,
-                          ),
-                          genesisEvent(GENESIS_OBJECT_KIND.verifierRegistry, VERIFIER_REGISTRY_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.identityRegistry, IDENTITY_REGISTRY_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.categoryRegistry, CATEGORY_REGISTRY_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
-                          genesisEvent(
-                              GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
-                              ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
-                          ),
-                          genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
-                      ],
-            hasNextPage: false,
-        }));
+        const absentClient = clientWithEvents({
+            [`${PACKAGE_ID}::admin::GenesisObjectCreated`]: genesisEvents(),
+            [`${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`]: [],
+        });
         await expect(
             resolvePublishedContractIds({
                 publishedToml,
@@ -209,82 +244,193 @@ describe("resolvePublishedContractIds", () => {
             }),
         ).rejects.toThrow("DisasterRegistryCreated must resolve to exactly one registry id");
 
-        const client = validClient();
-        vi.mocked(client.queryEvents).mockImplementation(async ({ query }) => ({
-            data:
-                query.MoveEventType === `${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`
-                    ? [registryEvent(DISASTER_REGISTRY_ID), registryEvent(objectId("dd"))]
-                    : [
-                          genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
-                          genesisEvent(
-                              GENESIS_OBJECT_KIND.membershipRegistry,
-                              MEMBERSHIP_REGISTRY_ID,
-                          ),
-                          genesisEvent(GENESIS_OBJECT_KIND.verifierRegistry, VERIFIER_REGISTRY_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.identityRegistry, IDENTITY_REGISTRY_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.categoryRegistry, CATEGORY_REGISTRY_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
-                          genesisEvent(
-                              GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
-                              ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
-                          ),
-                          genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
-                      ],
-            hasNextPage: false,
-        }));
+        const client = clientWithEvents({
+            [`${PACKAGE_ID}::admin::GenesisObjectCreated`]: genesisEvents(),
+            [`${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`]: [
+                registryEvent(DISASTER_REGISTRY_ID),
+                registryEvent(objectId("dd")),
+            ],
+        });
         await expect(
             resolvePublishedContractIds({ publishedToml, network: "testnet", client }),
         ).rejects.toThrow("DisasterRegistryCreated must resolve to exactly one registry id");
     });
 
     it("derives allowed residence registry from GenesisObjectCreated kind 13", async () => {
-        const client = validClient();
-        vi.mocked(client.queryEvents).mockImplementation(async ({ query }) => ({
-            data:
-                query.MoveEventType === `${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`
-                    ? [registryEvent(DISASTER_REGISTRY_ID)]
-                    : [
-                          genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
-                          genesisEvent(
-                              GENESIS_OBJECT_KIND.membershipRegistry,
-                              MEMBERSHIP_REGISTRY_ID,
-                          ),
-                          genesisEvent(GENESIS_OBJECT_KIND.verifierRegistry, VERIFIER_REGISTRY_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.identityRegistry, IDENTITY_REGISTRY_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.categoryRegistry, CATEGORY_REGISTRY_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.earthquakePool, EARTHQUAKE_POOL_ID),
-                          genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
-                      ],
-            hasNextPage: false,
-        }));
+        const client = clientWithEvents({
+            [`${PACKAGE_ID}::admin::GenesisObjectCreated`]: genesisEvents().filter(
+                (_node, index) => index !== 8,
+            ),
+            [`${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`]: [
+                registryEvent(DISASTER_REGISTRY_ID),
+            ],
+        });
         await expect(
             resolvePublishedContractIds({ publishedToml, network: "testnet", client }),
         ).rejects.toThrow("GenesisObjectCreated event is missing object kind 13");
 
-        expect(client.queryEvents).not.toHaveBeenCalledWith(
+        expect(client.query).not.toHaveBeenCalledWith(
             expect.objectContaining({
-                query: {
-                    MoveEventType: `${PACKAGE_ID}::allowed_residence_cell::AllowedResidenceCellRootUpdated`,
+                variables: expect.objectContaining({
+                    type: `${PACKAGE_ID}::allowed_residence_cell::AllowedResidenceCellRootUpdated`,
+                }),
+            }),
+        );
+    });
+
+    it("queries backward GraphQL pages and preserves newest-first event semantics", async () => {
+        const client: GraphqlQueryClient = {
+            query: vi.fn(async ({ variables }) => {
+                const isRegistry = variables.type.endsWith("::DisasterRegistryCreated");
+                if (isRegistry) {
+                    return {
+                        data: {
+                            events: {
+                                nodes: [registryEvent(DISASTER_REGISTRY_ID)],
+                                pageInfo: { hasPreviousPage: false, startCursor: null },
+                            },
+                        },
+                    };
+                }
+                if (variables.before === null) {
+                    return {
+                        data: {
+                            events: {
+                                nodes: [
+                                    genesisEvent(
+                                        GENESIS_OBJECT_KIND.cellCountIndex,
+                                        CELL_COUNT_INDEX_ID,
+                                    ),
+                                ],
+                                pageInfo: { hasPreviousPage: true, startCursor: "older-page" },
+                            },
+                        },
+                    };
+                }
+                return {
+                    data: {
+                        events: {
+                            nodes: [
+                                genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
+                                genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
+                                genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
+                                genesisEvent(
+                                    GENESIS_OBJECT_KIND.membershipRegistry,
+                                    MEMBERSHIP_REGISTRY_ID,
+                                ),
+                                genesisEvent(
+                                    GENESIS_OBJECT_KIND.verifierRegistry,
+                                    VERIFIER_REGISTRY_ID,
+                                ),
+                                genesisEvent(
+                                    GENESIS_OBJECT_KIND.identityRegistry,
+                                    IDENTITY_REGISTRY_ID,
+                                ),
+                                genesisEvent(
+                                    GENESIS_OBJECT_KIND.categoryRegistry,
+                                    CATEGORY_REGISTRY_ID,
+                                ),
+                                genesisEvent(
+                                    GENESIS_OBJECT_KIND.earthquakePool,
+                                    EARTHQUAKE_POOL_ID,
+                                ),
+                                genesisEvent(
+                                    GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
+                                    ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
+                                ),
+                            ],
+                            pageInfo: { hasPreviousPage: false, startCursor: null },
+                        },
+                    },
+                };
+            }),
+        };
+
+        await expect(
+            resolvePublishedContractIds({ publishedToml, network: "testnet", client }),
+        ).resolves.toMatchObject({ packageId: PACKAGE_ID });
+        expect(client.query).toHaveBeenCalledWith(
+            expect.objectContaining({
+                variables: {
+                    type: `${PACKAGE_ID}::admin::GenesisObjectCreated`,
+                    last: 50,
+                    before: null,
+                },
+            }),
+        );
+        expect(client.query).toHaveBeenCalledWith(
+            expect.objectContaining({
+                variables: {
+                    type: `${PACKAGE_ID}::admin::GenesisObjectCreated`,
+                    last: 50,
+                    before: "older-page",
                 },
             }),
         );
     });
 
-    it("fails closed on RPC errors", async () => {
+    it("fails closed on GraphQL errors and malformed responses", async () => {
+        const malformedResponses: readonly unknown[] = [
+            { errors: [{ message: "indexer unavailable" }] },
+            { data: null },
+            {
+                data: {
+                    events: { nodes: [], pageInfo: { hasPreviousPage: true, startCursor: null } },
+                },
+            },
+            {
+                data: {
+                    events: {
+                        nodes: [{ contents: { json: {} } }],
+                        pageInfo: { hasPreviousPage: false, startCursor: null },
+                    },
+                },
+            },
+        ];
+        for (const response of malformedResponses) {
+            await expect(
+                resolvePublishedContractIds({
+                    publishedToml,
+                    network: "testnet",
+                    client: { query: vi.fn(async () => response) },
+                }),
+            ).rejects.toThrow();
+        }
+    });
+
+    it("fails closed when a GraphQL page cursor does not advance", async () => {
         await expect(
             resolvePublishedContractIds({
                 publishedToml,
                 network: "testnet",
                 client: {
-                    queryEvents: vi.fn(async () => {
-                        throw new Error("rpc unavailable");
+                    query: vi.fn(async () => ({
+                        data: {
+                            events: {
+                                nodes: [],
+                                pageInfo: {
+                                    hasPreviousPage: true,
+                                    startCursor: "repeated-cursor",
+                                },
+                            },
+                        },
+                    })),
+                },
+            }),
+        ).rejects.toThrow("Malformed GraphQL event response");
+    });
+
+    it("fails closed on GraphQL transport errors", async () => {
+        await expect(
+            resolvePublishedContractIds({
+                publishedToml,
+                network: "testnet",
+                client: {
+                    query: vi.fn(async () => {
+                        throw new Error("graphql unavailable");
                     }),
                 },
             }),
-        ).rejects.toThrow("rpc unavailable");
+        ).rejects.toThrow("graphql unavailable");
     });
 });

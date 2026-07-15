@@ -2,7 +2,6 @@
 
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -11,6 +10,7 @@ import {
     readGenesisObjectIds,
     selectGenesisObjectId,
 } from "../chain/genesis-objects";
+import { createGraphqlEventClient } from "../chain/graphql-event-client";
 import { readClaimCampaigns } from "../claim/claim-campaigns";
 import { createClaimReadClient } from "../claim/claim-read-client";
 import { LoadingIndicator } from "../components/loading-indicator";
@@ -193,7 +193,7 @@ export function DonateView({
             return;
         }
 
-        const client = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
+        const client = createGraphqlEventClient({ network });
         let cancelled = false;
         setConfig(null);
 
@@ -322,7 +322,7 @@ export function DonateView({
             return;
         }
 
-        const client = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
+        const client = createGraphqlEventClient({ network });
         let cancelled = false;
         setDestinationState({
             status: "loading",
