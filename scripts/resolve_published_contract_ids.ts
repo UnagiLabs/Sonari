@@ -2,15 +2,26 @@ import { appendFile, readFile } from "node:fs/promises";
 import { SuiGraphQLClient } from "@mysten/sui/graphql";
 
 const QUERY_EVENTS_PAGE_LIMIT = 50;
-const EVENTS_QUERY = `
-    query MoveEvents($type: String!, $last: Int!, $before: String) {
-        events(filter: { type: $type }, last: $last, before: $before) {
-            nodes {
-                contents { json }
-            }
-            pageInfo {
-                hasPreviousPage
-                startCursor
+const PACKAGE_PUBLISH_EVENTS_QUERY = `
+    query PackagePublishEvents($packageId: SuiAddress!, $first: Int!, $after: String) {
+        object(address: $packageId) {
+            address
+            version
+            previousTransaction {
+                effects {
+                    events(first: $first, after: $after) {
+                        nodes {
+                            contents {
+                                type { repr }
+                                json
+                            }
+                        }
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                    }
+                }
             }
         }
     }
@@ -48,9 +59,9 @@ export interface GraphqlQueryClient {
     query(input: {
         readonly query: string;
         readonly variables: {
-            readonly type: string;
-            readonly last: number;
-            readonly before: string | null;
+            readonly packageId: string;
+            readonly first: number;
+            readonly after: string | null;
         };
     }): Promise<unknown>;
 }
@@ -75,6 +86,11 @@ interface RegistryCreatedRecord {
     readonly registryId: string;
 }
 
+interface MoveEventRecord {
+    readonly type: string;
+    readonly json: Record<string, unknown>;
+}
+
 export function readPublishedPackageId(input: string, network: string): string {
     const normalizedNetwork = normalizeNetwork(network);
     const section = new RegExp(
@@ -94,7 +110,8 @@ export async function resolvePublishedContractIds(
     input: ResolvePublishedContractIdsInput,
 ): Promise<ResolvedPublishedContractIds> {
     const packageId = readPublishedPackageId(input.publishedToml, input.network);
-    const genesisObjects = await readGenesisObjects(input.client, packageId);
+    const publishEvents = await readPackagePublishEvents(input.client, packageId);
+    const genesisObjects = readGenesisObjects(publishEvents, packageId);
     const env: Record<string, string> = {
         SONARI_IDENTITY_PACKAGE_ID: packageId,
         RELAYER_TARGET: `${packageId}::accessor::create_disaster_event_and_campaign_from_signed_payload`,
@@ -116,8 +133,8 @@ export async function resolvePublishedContractIds(
     env.FLOOR_CENSUS_CELL_COUNT_INDEX = requireEnvValue(env, "SONARI_CELL_COUNT_INDEX_ID");
     env.FLOOR_CENSUS_CATEGORY_POOL = requireEnvValue(env, "SONARI_FLOOR_CENSUS_CATEGORY_POOL");
 
-    env.RELAYER_REGISTRY = await readSingleRegistryCreatedEvent(
-        input.client,
+    env.RELAYER_REGISTRY = readSingleRegistryCreatedEvent(
+        publishEvents,
         `${packageId}::disaster_event::DisasterRegistryCreated`,
         "DisasterRegistryCreated",
     );
@@ -144,11 +161,12 @@ export function parseRegistryCreatedEvent(raw: unknown, eventName: string): Regi
     return { registryId };
 }
 
-async function readGenesisObjects(
-    client: GraphqlQueryClient,
+function readGenesisObjects(
+    events: readonly MoveEventRecord[],
     packageId: string,
-): Promise<ReadonlyMap<number, string>> {
-    const records = await readMoveEvents(client, `${packageId}::admin::GenesisObjectCreated`);
+): ReadonlyMap<number, string> {
+    const eventType = `${packageId}::admin::GenesisObjectCreated`;
+    const records = events.filter((event) => event.type === eventType);
     const objects = new Map<number, string>();
     for (const record of records.map(parseGenesisObjectCreatedEvent)) {
         if (objects.has(record.objectKind)) {
@@ -159,12 +177,12 @@ async function readGenesisObjects(
     return objects;
 }
 
-async function readSingleRegistryCreatedEvent(
-    client: GraphqlQueryClient,
+function readSingleRegistryCreatedEvent(
+    events: readonly MoveEventRecord[],
     eventType: string,
     eventName: string,
-): Promise<string> {
-    const records = await readMoveEvents(client, eventType);
+): string {
+    const records = events.filter((event) => event.type === eventType);
     const registryIds = records.map(
         (record) => parseRegistryCreatedEvent(record, eventName).registryId,
     );
@@ -178,28 +196,28 @@ async function readSingleRegistryCreatedEvent(
     return registryId;
 }
 
-async function readMoveEvents(
+async function readPackagePublishEvents(
     client: GraphqlQueryClient,
-    eventType: string,
-): Promise<readonly unknown[]> {
-    const records: unknown[] = [];
+    packageId: string,
+): Promise<readonly MoveEventRecord[]> {
+    const records: MoveEventRecord[] = [];
     let cursor: string | null = null;
     const seenCursors = new Set<string>();
     for (;;) {
         const response = await client.query({
-            query: EVENTS_QUERY,
+            query: PACKAGE_PUBLISH_EVENTS_QUERY,
             variables: {
-                type: eventType,
-                last: QUERY_EVENTS_PAGE_LIMIT,
-                before: cursor,
+                packageId,
+                first: QUERY_EVENTS_PAGE_LIMIT,
+                after: cursor,
             },
         });
-        const page = parseGraphqlEventPage(response);
+        const page = parseGraphqlEventPage(response, packageId);
         records.push(...page.data);
-        if (!page.hasPreviousPage) {
+        if (!page.hasNextPage) {
             return records;
         }
-        const nextCursor = page.startCursor;
+        const nextCursor = page.endCursor;
         if (nextCursor === null || seenCursors.has(nextCursor)) {
             throw malformedGraphqlResponse();
         }
@@ -208,10 +226,13 @@ async function readMoveEvents(
     }
 }
 
-function parseGraphqlEventPage(value: unknown): {
-    readonly data: readonly unknown[];
-    readonly hasPreviousPage: boolean;
-    readonly startCursor: string | null;
+function parseGraphqlEventPage(
+    value: unknown,
+    packageId: string,
+): {
+    readonly data: readonly MoveEventRecord[];
+    readonly hasNextPage: boolean;
+    readonly endCursor: string | null;
 } {
     if (!isRecord(value)) {
         throw malformedGraphqlResponse();
@@ -230,37 +251,54 @@ function parseGraphqlEventPage(value: unknown): {
             throw new Error(`GraphQL event query failed: ${messages.join("; ")}`);
         }
     }
-    const events = isRecord(value.data) ? value.data.events : undefined;
-    const nodes = isRecord(events) ? events.nodes : undefined;
-    const pageInfo = isRecord(events) ? events.pageInfo : undefined;
-    if (!Array.isArray(nodes) || !isRecord(pageInfo)) {
+    const object = isRecord(value.data) ? value.data.object : undefined;
+    if (!isRecord(object)) {
         throw malformedGraphqlResponse();
     }
-    const hasPreviousPage = pageInfo.hasPreviousPage;
-    const startCursor = pageInfo.startCursor;
+    const address = parseObjectId(object.address);
+    const previousTransaction = object.previousTransaction;
+    const effects = isRecord(previousTransaction) ? previousTransaction.effects : undefined;
+    const events = isRecord(effects) ? effects.events : undefined;
+    const nodes = isRecord(events) ? events.nodes : undefined;
+    const pageInfo = isRecord(events) ? events.pageInfo : undefined;
     if (
-        typeof hasPreviousPage !== "boolean" ||
-        (startCursor !== null && typeof startCursor !== "string") ||
-        (hasPreviousPage && (typeof startCursor !== "string" || startCursor.length === 0))
+        address === null ||
+        address.toLowerCase() !== packageId.toLowerCase() ||
+        object.version !== 1 ||
+        !Array.isArray(nodes) ||
+        !isRecord(pageInfo)
+    ) {
+        throw malformedGraphqlResponse();
+    }
+    const hasNextPage = pageInfo.hasNextPage;
+    const endCursor = pageInfo.endCursor;
+    if (
+        typeof hasNextPage !== "boolean" ||
+        (endCursor !== null && typeof endCursor !== "string") ||
+        (hasNextPage && (typeof endCursor !== "string" || endCursor.length === 0))
     ) {
         throw malformedGraphqlResponse();
     }
     return {
-        data: nodes.map(parseGraphqlEventNode).reverse(),
-        hasPreviousPage,
-        startCursor,
+        data: nodes.map(parseGraphqlEventNode),
+        hasNextPage,
+        endCursor,
     };
 }
 
-function parseGraphqlEventNode(value: unknown): { readonly json: Record<string, unknown> } {
+function parseGraphqlEventNode(value: unknown): MoveEventRecord {
     if (!isRecord(value)) {
         throw malformedGraphqlResponse();
     }
     const contents = value.contents;
-    if (!isRecord(contents) || !isRecord(contents.json)) {
+    if (!isRecord(contents)) {
         throw malformedGraphqlResponse();
     }
-    return { json: contents.json };
+    const type = isRecord(contents.type) ? contents.type.repr : undefined;
+    if (typeof type !== "string" || type.length === 0 || !isRecord(contents.json)) {
+        throw malformedGraphqlResponse();
+    }
+    return { type, json: contents.json };
 }
 
 function readParsedJson(raw: unknown): Record<string, unknown> {

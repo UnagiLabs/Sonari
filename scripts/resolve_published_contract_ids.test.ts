@@ -21,6 +21,8 @@ const EARTHQUAKE_POOL_ID = objectId("0b");
 const DISASTER_REGISTRY_ID = objectId("0d");
 const ALLOWED_RESIDENCE_CELL_REGISTRY_ID = objectId("0e");
 const CELL_COUNT_INDEX_ID = objectId("0f");
+const GENESIS_EVENT_TYPE = `${PACKAGE_ID}::admin::GenesisObjectCreated`;
+const DISASTER_REGISTRY_EVENT_TYPE = `${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`;
 const NEXT_PUBLIC_OBJECT_ID_ENV_NAMES = [
     `NEXT_PUBLIC_SONARI_${"ALLOWED_RESIDENCE_CELL_REGISTRY_ID"}`,
     `NEXT_PUBLIC_SONARI_${"IDENTITY_REGISTRY_ID"}`,
@@ -45,12 +47,12 @@ function objectId(byte: string): string {
     return `0x${byte.repeat(32)}`;
 }
 
-function event(json: Record<string, unknown>): unknown {
-    return { contents: { json } };
+function event(type: string, json: Record<string, unknown>): unknown {
+    return { contents: { type: { repr: type }, json } };
 }
 
 function genesisEvent(objectKind: number, objectIdValue: string) {
-    return event({
+    return event(GENESIS_EVENT_TYPE, {
         object_id: objectIdValue,
         object_kind: objectKind,
         shared: true,
@@ -60,35 +62,43 @@ function genesisEvent(objectKind: number, objectIdValue: string) {
 }
 
 function registryEvent(registryId: string) {
-    return event({
+    return event(DISASTER_REGISTRY_EVENT_TYPE, {
         registry_id: registryId,
         created_at_ms: "1",
         actor: objectId("99"),
     });
 }
 
-function clientWithEvents(
-    eventsByType: Readonly<Record<string, readonly unknown[]>>,
-): GraphqlQueryClient {
+function packageEventsResponse(
+    nodes: readonly unknown[],
+    pageInfo: { readonly hasNextPage: boolean; readonly endCursor: string | null } = {
+        hasNextPage: false,
+        endCursor: null,
+    },
+): unknown {
     return {
-        query: vi.fn(async ({ variables }) => ({
-            data: {
-                events: {
-                    nodes: eventsByType[variables.type] ?? [],
-                    pageInfo: { hasPreviousPage: false, startCursor: null },
+        data: {
+            object: {
+                address: PACKAGE_ID,
+                version: 1,
+                previousTransaction: {
+                    effects: {
+                        events: { nodes, pageInfo },
+                    },
                 },
             },
-        })),
+        },
+    };
+}
+
+function clientWithEvents(events: readonly unknown[]): GraphqlQueryClient {
+    return {
+        query: vi.fn(async () => packageEventsResponse(events)),
     };
 }
 
 function validClient(): GraphqlQueryClient {
-    return clientWithEvents({
-        [`${PACKAGE_ID}::admin::GenesisObjectCreated`]: genesisEvents(),
-        [`${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`]: [
-            registryEvent(DISASTER_REGISTRY_ID),
-        ],
-    });
+    return clientWithEvents([...genesisEvents(), registryEvent(DISASTER_REGISTRY_ID)]);
 }
 
 function genesisEvents(): readonly unknown[] {
@@ -232,10 +242,7 @@ describe("resolvePublishedContractIds", () => {
     });
 
     it("fails closed when DisasterRegistryCreated is absent or ambiguous", async () => {
-        const absentClient = clientWithEvents({
-            [`${PACKAGE_ID}::admin::GenesisObjectCreated`]: genesisEvents(),
-            [`${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`]: [],
-        });
+        const absentClient = clientWithEvents(genesisEvents());
         await expect(
             resolvePublishedContractIds({
                 publishedToml,
@@ -244,105 +251,39 @@ describe("resolvePublishedContractIds", () => {
             }),
         ).rejects.toThrow("DisasterRegistryCreated must resolve to exactly one registry id");
 
-        const client = clientWithEvents({
-            [`${PACKAGE_ID}::admin::GenesisObjectCreated`]: genesisEvents(),
-            [`${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`]: [
-                registryEvent(DISASTER_REGISTRY_ID),
-                registryEvent(objectId("dd")),
-            ],
-        });
+        const client = clientWithEvents([
+            ...genesisEvents(),
+            registryEvent(DISASTER_REGISTRY_ID),
+            registryEvent(objectId("dd")),
+        ]);
         await expect(
             resolvePublishedContractIds({ publishedToml, network: "testnet", client }),
         ).rejects.toThrow("DisasterRegistryCreated must resolve to exactly one registry id");
     });
 
     it("derives allowed residence registry from GenesisObjectCreated kind 13", async () => {
-        const client = clientWithEvents({
-            [`${PACKAGE_ID}::admin::GenesisObjectCreated`]: genesisEvents().filter(
-                (_node, index) => index !== 8,
-            ),
-            [`${PACKAGE_ID}::disaster_event::DisasterRegistryCreated`]: [
-                registryEvent(DISASTER_REGISTRY_ID),
-            ],
-        });
+        const client = clientWithEvents([
+            ...genesisEvents().filter((_node, index) => index !== 8),
+            registryEvent(DISASTER_REGISTRY_ID),
+        ]);
         await expect(
             resolvePublishedContractIds({ publishedToml, network: "testnet", client }),
         ).rejects.toThrow("GenesisObjectCreated event is missing object kind 13");
 
-        expect(client.query).not.toHaveBeenCalledWith(
-            expect.objectContaining({
-                variables: expect.objectContaining({
-                    type: `${PACKAGE_ID}::allowed_residence_cell::AllowedResidenceCellRootUpdated`,
-                }),
-            }),
-        );
+        expect(client.query).toHaveBeenCalledTimes(1);
     });
 
-    it("queries backward GraphQL pages and preserves newest-first event semantics", async () => {
+    it("reads the package publish transaction and follows its event pages", async () => {
+        const firstPage = genesisEvents().slice(0, 5);
+        const secondPage = [...genesisEvents().slice(5), registryEvent(DISASTER_REGISTRY_ID)];
         const client: GraphqlQueryClient = {
             query: vi.fn(async ({ variables }) => {
-                const isRegistry = variables.type.endsWith("::DisasterRegistryCreated");
-                if (isRegistry) {
-                    return {
-                        data: {
-                            events: {
-                                nodes: [registryEvent(DISASTER_REGISTRY_ID)],
-                                pageInfo: { hasPreviousPage: false, startCursor: null },
-                            },
-                        },
-                    };
-                }
-                if (variables.before === null) {
-                    return {
-                        data: {
-                            events: {
-                                nodes: [
-                                    genesisEvent(
-                                        GENESIS_OBJECT_KIND.cellCountIndex,
-                                        CELL_COUNT_INDEX_ID,
-                                    ),
-                                ],
-                                pageInfo: { hasPreviousPage: true, startCursor: "older-page" },
-                            },
-                        },
-                    };
-                }
-                return {
-                    data: {
-                        events: {
-                            nodes: [
-                                genesisEvent(GENESIS_OBJECT_KIND.adminCap, ADMIN_CAP_ID),
-                                genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
-                                genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
-                                genesisEvent(
-                                    GENESIS_OBJECT_KIND.membershipRegistry,
-                                    MEMBERSHIP_REGISTRY_ID,
-                                ),
-                                genesisEvent(
-                                    GENESIS_OBJECT_KIND.verifierRegistry,
-                                    VERIFIER_REGISTRY_ID,
-                                ),
-                                genesisEvent(
-                                    GENESIS_OBJECT_KIND.identityRegistry,
-                                    IDENTITY_REGISTRY_ID,
-                                ),
-                                genesisEvent(
-                                    GENESIS_OBJECT_KIND.categoryRegistry,
-                                    CATEGORY_REGISTRY_ID,
-                                ),
-                                genesisEvent(
-                                    GENESIS_OBJECT_KIND.earthquakePool,
-                                    EARTHQUAKE_POOL_ID,
-                                ),
-                                genesisEvent(
-                                    GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
-                                    ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
-                                ),
-                            ],
-                            pageInfo: { hasPreviousPage: false, startCursor: null },
-                        },
-                    },
-                };
+                return variables.after === null
+                    ? packageEventsResponse(firstPage, {
+                          hasNextPage: true,
+                          endCursor: "next-page",
+                      })
+                    : packageEventsResponse(secondPage);
             }),
         };
 
@@ -352,20 +293,23 @@ describe("resolvePublishedContractIds", () => {
         expect(client.query).toHaveBeenCalledWith(
             expect.objectContaining({
                 variables: {
-                    type: `${PACKAGE_ID}::admin::GenesisObjectCreated`,
-                    last: 50,
-                    before: null,
+                    packageId: PACKAGE_ID,
+                    first: 50,
+                    after: null,
                 },
             }),
         );
         expect(client.query).toHaveBeenCalledWith(
             expect.objectContaining({
                 variables: {
-                    type: `${PACKAGE_ID}::admin::GenesisObjectCreated`,
-                    last: 50,
-                    before: "older-page",
+                    packageId: PACKAGE_ID,
+                    first: 50,
+                    after: "next-page",
                 },
             }),
+        );
+        expect(vi.mocked(client.query).mock.calls[0]?.[0].query).toContain(
+            "object(address: $packageId)",
         );
     });
 
@@ -375,17 +319,15 @@ describe("resolvePublishedContractIds", () => {
             { data: null },
             {
                 data: {
-                    events: { nodes: [], pageInfo: { hasPreviousPage: true, startCursor: null } },
-                },
-            },
-            {
-                data: {
-                    events: {
-                        nodes: [{ contents: { json: {} } }],
-                        pageInfo: { hasPreviousPage: false, startCursor: null },
+                    object: {
+                        address: objectId("bb"),
+                        version: 1,
+                        previousTransaction: null,
                     },
                 },
             },
+            packageEventsResponse([], { hasNextPage: true, endCursor: null }),
+            packageEventsResponse([{ contents: { type: null, json: {} } }]),
         ];
         for (const response of malformedResponses) {
             await expect(
@@ -404,17 +346,12 @@ describe("resolvePublishedContractIds", () => {
                 publishedToml,
                 network: "testnet",
                 client: {
-                    query: vi.fn(async () => ({
-                        data: {
-                            events: {
-                                nodes: [],
-                                pageInfo: {
-                                    hasPreviousPage: true,
-                                    startCursor: "repeated-cursor",
-                                },
-                            },
-                        },
-                    })),
+                    query: vi.fn(async () =>
+                        packageEventsResponse([], {
+                            hasNextPage: true,
+                            endCursor: "repeated-cursor",
+                        }),
+                    ),
                 },
             }),
         ).rejects.toThrow("Malformed GraphQL event response");
