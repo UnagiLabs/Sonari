@@ -20,6 +20,20 @@ const EVENTS_QUERY = `
     }
 `;
 
+const OBJECTS_QUERY = `
+    query ObjectsByType($type: String!, $first: Int!, $after: String) {
+        objects(filter: { type: $type }, first: $first, after: $after) {
+            nodes {
+                address
+            }
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
+        }
+    }
+`;
+
 export interface MoveEvent {
     readonly id: string;
     readonly timestampMs: number;
@@ -39,6 +53,22 @@ export interface MoveEventQueryClient {
         readonly limit?: number;
     }): Promise<MoveEventPage>;
 }
+
+export interface ObjectListingPage {
+    readonly data: readonly string[];
+    readonly hasNextPage?: boolean;
+    readonly nextCursor?: string | null;
+}
+
+export interface ObjectListingQueryClient {
+    queryObjectsByType(input: {
+        readonly type: string;
+        readonly cursor?: string | null;
+        readonly limit?: number;
+    }): Promise<ObjectListingPage>;
+}
+
+export type GraphqlReadClient = MoveEventQueryClient & ObjectListingQueryClient;
 
 export interface GraphqlEventClientOptions {
     readonly network?: WalletNetwork;
@@ -63,7 +93,7 @@ export function resolveGraphqlEventClientConfig(
 
 export function createGraphqlEventClient(
     options: GraphqlEventClientOptions = {},
-): MoveEventQueryClient {
+): GraphqlReadClient {
     const config = resolveGraphqlEventClientConfig(options);
     const client = new SuiGraphQLClient({
         network: config.network,
@@ -91,6 +121,26 @@ export function createGraphqlEventClient(
                 );
             }
             return parseEventPage(result.data);
+        },
+        async queryObjectsByType(input): Promise<ObjectListingPage> {
+            const requestedLimit = input.limit ?? DEFAULT_PAGE_LIMIT;
+            if (!Number.isInteger(requestedLimit) || requestedLimit <= 0) {
+                throw new Error("GraphQL object query limit must be a positive integer.");
+            }
+            const result = await client.query({
+                query: OBJECTS_QUERY,
+                variables: {
+                    type: input.type,
+                    first: Math.min(requestedLimit, DEFAULT_PAGE_LIMIT),
+                    after: input.cursor ?? null,
+                },
+            });
+            if (result.errors !== undefined && result.errors.length > 0) {
+                throw new Error(
+                    `GraphQL object query failed: ${result.errors.map((error) => error.message).join("; ")}`,
+                );
+            }
+            return parseObjectListingPage(result.data);
         },
     };
 }
@@ -159,8 +209,47 @@ function parseEventNode(value: unknown): MoveEvent {
     };
 }
 
+function parseObjectListingPage(value: unknown): ObjectListingPage {
+    const objects = isRecord(value) ? value.objects : undefined;
+    const nodes = isRecord(objects) ? objects.nodes : undefined;
+    const pageInfo = isRecord(objects) ? objects.pageInfo : undefined;
+    if (!Array.isArray(nodes) || !isRecord(pageInfo)) {
+        throw malformedObjectResponse();
+    }
+
+    const hasNextPage = pageInfo.hasNextPage;
+    const nextCursor = pageInfo.endCursor;
+    if (
+        typeof hasNextPage !== "boolean" ||
+        (nextCursor !== null && typeof nextCursor !== "string") ||
+        (hasNextPage && (typeof nextCursor !== "string" || nextCursor.length === 0))
+    ) {
+        throw malformedObjectResponse();
+    }
+
+    return { data: nodes.map(parseObjectListingNode), hasNextPage, nextCursor };
+}
+
+function parseObjectListingNode(value: unknown): string {
+    if (!isRecord(value) || typeof value.address !== "string") {
+        throw malformedObjectResponse();
+    }
+    return normalizeObjectId(value.address);
+}
+
+function normalizeObjectId(value: string): string {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+        throw malformedObjectResponse();
+    }
+    return value.toLowerCase();
+}
+
 function malformedResponse(): Error {
     return new Error("Malformed GraphQL event response.");
+}
+
+function malformedObjectResponse(): Error {
+    return new Error("Malformed GraphQL object response.");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
