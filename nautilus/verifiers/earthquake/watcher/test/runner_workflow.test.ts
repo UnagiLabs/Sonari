@@ -2525,6 +2525,85 @@ describe("AWS runner workflow helper", () => {
         expect(client.requests[0]?.transaction).toBeDefined();
     });
 
+    it("recovers duplicate census enclave registration from matching VerifierRegistry state", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
+        const client = new RecordingEnclaveRegistrationClient(
+            Array.from({ length: 32 }, () => 0x22),
+            5,
+            {
+                failDuplicateRegistration: true,
+                registryObject: verifierRegistryObject({
+                    configKey: 3,
+                    verifierFamily: 5,
+                    publicKey: finalizedPublicKey,
+                    nowMs: 1_800_000_000_000,
+                }),
+            },
+        );
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: true,
+            signer,
+            client,
+            instanceTtlMs: 60_000,
+            configKey: 3,
+            expectedFamily: 5,
+            now: () => 1_800_000_000_000,
+        });
+
+        await expect(
+            adapter.register({
+                sourceEventId: "us7000sonari",
+                attestationDocumentHex,
+                publicKey: finalizedPublicKey,
+            }),
+        ).resolves.toEqual(censusRegistrationMetadata);
+        expect(client.objectReads).toEqual([
+            { objectId: earthquakeRelayerVerifierRegistry, options: { showContent: true } },
+        ]);
+    });
+
+    it("fails duplicate enclave registration when VerifierRegistry state does not match", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
+        const client = new RecordingEnclaveRegistrationClient(
+            Array.from({ length: 32 }, () => 0x22),
+            5,
+            {
+                failDuplicateRegistration: true,
+                registryObject: verifierRegistryObject({
+                    configKey: 3,
+                    verifierFamily: 5,
+                    publicKey: `0x${"33".repeat(32)}`,
+                    nowMs: 1_800_000_000_000,
+                }),
+            },
+        );
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: true,
+            signer,
+            client,
+            instanceTtlMs: 60_000,
+            configKey: 3,
+            expectedFamily: 5,
+            now: () => 1_800_000_000_000,
+        });
+
+        await expect(
+            adapter.register({
+                sourceEventId: "us7000sonari",
+                attestationDocumentHex,
+                publicKey: finalizedPublicKey,
+            }),
+        ).rejects.toThrow(/duplicate enclave instance was not found/);
+    });
+
     it("accepts base64 encoded enclave public keys in Sui registration events", async () => {
         const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
         const client = new RecordingEnclaveRegistrationClient(
@@ -3105,8 +3184,11 @@ function finalizedResultForSourceEvent(
     sourceEventId: string,
 ): Extract<TeeCoreResult, { status: "finalized" }> {
     const result = finalizedResult();
+    if (result.status !== "finalized") {
+        throw new Error("fixture expected finalized result");
+    }
     const payload: EarthquakeOraclePayload = {
-        ...result.payload,
+        ...(result.payload as EarthquakeOraclePayload),
         source_event_id: sourceEventId,
     };
     return {
@@ -3481,10 +3563,15 @@ class RecordingEnclaveRegistrationClient implements EnclaveRegistrationClient {
         signer: unknown;
         include: { effects: true; events: true };
     }> = [];
+    readonly objectReads: Array<{ objectId: string; options: { showContent: true } }> = [];
 
     constructor(
         private readonly eventPublicKey: unknown = Array.from({ length: 32 }, () => 0x22),
         private readonly verifierFamily = 3,
+        private readonly options: {
+            failDuplicateRegistration?: boolean;
+            registryObject?: unknown;
+        } = {},
     ) {}
 
     async signAndExecuteTransaction(input: {
@@ -3493,6 +3580,22 @@ class RecordingEnclaveRegistrationClient implements EnclaveRegistrationClient {
         include: { effects: true; events: true };
     }) {
         this.requests.push(input);
+        if (this.options.failDuplicateRegistration === true) {
+            return {
+                $kind: "FailedTransaction" as const,
+                FailedTransaction: {
+                    status: {
+                        success: false,
+                        error: {
+                            message:
+                                "MoveAbort in 0x123::metadata_verifier::register_enclave_instance_internal, abort code 16",
+                        },
+                    },
+                    effects: {},
+                    events: [],
+                },
+            };
+        }
         return {
             $kind: "Transaction" as const,
             Transaction: {
@@ -3512,6 +3615,56 @@ class RecordingEnclaveRegistrationClient implements EnclaveRegistrationClient {
             },
         };
     }
+
+    async getObject(input: { objectId: string; options: { showContent: true } }): Promise<unknown> {
+        this.objectReads.push(input);
+        return this.options.registryObject;
+    }
+}
+
+function verifierRegistryObject(input: {
+    configKey: number;
+    verifierFamily: number;
+    publicKey: string;
+    nowMs: number;
+}): unknown {
+    const publicKeyBytes = Array.from(Buffer.from(input.publicKey.slice(2), "hex"));
+    return {
+        data: {
+            content: {
+                fields: {
+                    configs: {
+                        contents: [
+                            {
+                                key: String(input.configKey),
+                                value: {
+                                    verifier_family: input.verifierFamily,
+                                    verifier_version: "1",
+                                    config_version: String(censusRegistrationMetadata.verifier_config_version),
+                                    enabled: true,
+                                },
+                            },
+                        ],
+                    },
+                    instances: {
+                        contents: [
+                            {
+                                key: publicKeyBytes,
+                                value: {
+                                    verifier_family: input.verifierFamily,
+                                    verifier_version: "1",
+                                    config_version: String(censusRegistrationMetadata.verifier_config_version),
+                                    public_key: publicKeyBytes,
+                                    enabled: true,
+                                    expires_at_ms: String(input.nowMs + 60_000),
+                                },
+                            },
+                        ],
+                    },
+                },
+            },
+        },
+    };
 }
 
 class RecordingRelayerSignerSecretReader implements RelayerSignerSecretReader {

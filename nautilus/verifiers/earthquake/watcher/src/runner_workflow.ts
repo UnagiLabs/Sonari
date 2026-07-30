@@ -228,6 +228,7 @@ export interface EnclaveRegistrationClient {
         signer: RelayerSigner;
         include: { effects: true; events: true };
     }): Promise<EnclaveRegistrationExecutionResponse>;
+    getObject?(input: { objectId: string; options: { showContent: true } }): Promise<unknown>;
 }
 
 export interface EnclaveRegistrationExecutionStatus {
@@ -1759,12 +1760,27 @@ export class SuiEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter
                     ? {}
                     : { configKey: this.config.configKey }),
             });
-        const response = await client.signAndExecuteTransaction({
-            transaction,
-            signer,
-            include: { effects: true, events: true },
-        });
-        const events = readSuccessfulEnclaveRegistrationEvents(response);
+        let events: EnclaveRegistrationEvent[];
+        try {
+            const response = await client.signAndExecuteTransaction({
+                transaction,
+                signer,
+                include: { effects: true, events: true },
+            });
+            events = readSuccessfulEnclaveRegistrationEvents(response);
+        } catch (error) {
+            if (!isDuplicateEnclaveRegistrationError(error)) {
+                throw error;
+            }
+            return await readDuplicateEnclaveRegistrationMetadata(client, {
+                verifierRegistry: this.config.verifierRegistry,
+                publicKey: input.publicKey,
+                expectedFamily: this.config.expectedFamily ?? 3,
+                expectedVersion: 1,
+                configKey: this.config.configKey ?? EARTHQUAKE_VERIFIER_CONFIG_KEY,
+                nowMs,
+            });
+        }
         const metadata = readEnclaveRegistrationMetadata(events, {
             expectedFamily: this.config.expectedFamily ?? 3,
             expectedVersion: 1,
@@ -2658,6 +2674,9 @@ function parseTeeResult(text: string, expectedSourceEventId: string): TeeCoreRes
         if (!validation.ok) {
             throw new Error(`invalid finalized TEE result: ${validation.message}`);
         }
+        if (typeof validation.value.payload.source_event_id !== "string") {
+            throw new Error("invalid finalized TEE result: payload.source_event_id is missing");
+        }
         assertTeeResultSourceEventId(
             validation.value.payload.source_event_id,
             expectedSourceEventId,
@@ -3153,6 +3172,151 @@ function readExecutionErrorMessage(value: unknown): string | undefined {
     }
     if (isRecord(value) && typeof value.message === "string" && value.message.length > 0) {
         return value.message;
+    }
+    return undefined;
+}
+
+function isDuplicateEnclaveRegistrationError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+        /\bmetadata_verifier\b/.test(message) &&
+        /\bregister_enclave_instance(?:_internal|_for_config)?\b/.test(message) &&
+        /\b(?:abort|code)\D*16\b/i.test(message)
+    );
+}
+
+async function readDuplicateEnclaveRegistrationMetadata(
+    client: EnclaveRegistrationClient,
+    options: {
+        verifierRegistry: string;
+        publicKey: string;
+        expectedFamily: number;
+        expectedVersion: number;
+        configKey: number;
+        nowMs: number;
+    },
+): Promise<EnclaveVerificationMetadata> {
+    if (client.getObject === undefined) {
+        throw new Error("duplicate enclave registration requires VerifierRegistry object readback");
+    }
+    const response = await client.getObject({
+        objectId: options.verifierRegistry,
+        options: { showContent: true },
+    });
+    return readEnclaveRegistrationMetadataFromRegistry(response, options);
+}
+
+function readEnclaveRegistrationMetadataFromRegistry(
+    response: unknown,
+    options: {
+        publicKey: string;
+        expectedFamily: number;
+        expectedVersion: number;
+        configKey: number;
+        nowMs: number;
+    },
+): EnclaveVerificationMetadata {
+    const fields = readSuiObjectFields(response);
+    const configs = readVecMapEntries(fields.configs);
+    const config = configs.find((entry) => readSafeInteger(entry.key) === options.configKey);
+    if (config === undefined || !isRecord(config.value)) {
+        throw new Error("VerifierRegistry config entry for duplicate enclave was not found");
+    }
+    const configVersion = readSafeInteger(config.value.config_version);
+    if (
+        readSafeInteger(config.value.verifier_family) !== options.expectedFamily ||
+        readSafeInteger(config.value.verifier_version) !== options.expectedVersion ||
+        configVersion === undefined ||
+        config.value.enabled !== true
+    ) {
+        throw new Error(
+            "VerifierRegistry config entry did not match duplicate enclave expectations",
+        );
+    }
+
+    const expectedPublicKey = normalizeHex(options.publicKey);
+    const instance = readVecMapEntries(fields.instances).find(
+        (entry) => readHexBytesLike(entry.key) === expectedPublicKey,
+    );
+    if (instance === undefined || !isRecord(instance.value)) {
+        throw new Error("VerifierRegistry duplicate enclave instance was not found");
+    }
+    const instancePublicKey = readHexBytesLike(instance.value.public_key);
+    const expiresAtMs = readSafeInteger(instance.value.expires_at_ms);
+    if (
+        instancePublicKey !== expectedPublicKey ||
+        readSafeInteger(instance.value.verifier_family) !== options.expectedFamily ||
+        readSafeInteger(instance.value.verifier_version) !== options.expectedVersion ||
+        readSafeInteger(instance.value.config_version) !== configVersion ||
+        instance.value.enabled !== true ||
+        expiresAtMs === undefined ||
+        expiresAtMs <= options.nowMs
+    ) {
+        throw new Error("VerifierRegistry duplicate enclave instance did not match expectations");
+    }
+    return {
+        verifier_config_key: options.configKey,
+        verifier_config_version: configVersion,
+        enclave_instance_public_key: `0x${instancePublicKey}`,
+    };
+}
+
+function readSuiObjectFields(response: unknown): Record<string, unknown> {
+    const data = isRecord(response) ? response.data : undefined;
+    const content = isRecord(data) ? data.content : undefined;
+    const fields = isRecord(content) ? content.fields : undefined;
+    if (!isRecord(fields)) {
+        throw new Error("VerifierRegistry object readback was malformed");
+    }
+    return fields;
+}
+
+function readVecMapEntries(value: unknown): Array<{ key: unknown; value: unknown }> {
+    if (!isRecord(value) || !Array.isArray(value.contents)) {
+        return [];
+    }
+    return value.contents.flatMap((entry) =>
+        isRecord(entry) && "key" in entry && "value" in entry
+            ? [{ key: entry.key, value: entry.value }]
+            : [],
+    );
+}
+
+function readSafeInteger(value: unknown): number | undefined {
+    if (Number.isSafeInteger(value)) {
+        return value as number;
+    }
+    if (typeof value === "string" && /^[0-9]+$/.test(value)) {
+        const parsed = Number(value);
+        return Number.isSafeInteger(parsed) ? parsed : undefined;
+    }
+    return undefined;
+}
+
+function readHexBytesLike(value: unknown): string | undefined {
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (/^0x[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0) {
+            return normalizeHex(trimmed);
+        }
+        try {
+            const decoded = Array.from(Buffer.from(trimmed, "base64"));
+            if (decoded.length > 0) {
+                return normalizeHex(
+                    `0x${decoded.map((byte) => byte.toString(16).padStart(2, "0")).join("")}`,
+                );
+            }
+        } catch {
+            return undefined;
+        }
+    }
+    if (
+        Array.isArray(value) &&
+        value.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+    ) {
+        return normalizeHex(
+            `0x${value.map((byte) => byte.toString(16).padStart(2, "0")).join("")}`,
+        );
     }
     return undefined;
 }
