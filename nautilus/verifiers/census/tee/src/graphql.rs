@@ -14,7 +14,6 @@ const GRAPHQL_REQUEST_TIMEOUT_MS: u64 = 10_000;
 // Sui GraphQL enforces maxPageSize / maxMultiGetSize = 50 for connection pages
 // and multi-get key batches. Larger values fail with "Page size is too large".
 const DEFAULT_CELL_COUNT_BATCH_SIZE: usize = 50;
-const EVENT_PAGE_SIZE: u64 = 50;
 const MAX_GRAPHQL_PAGES: usize = 512;
 const DEFAULT_SHARD_CONCURRENCY_LIMIT: usize = 8;
 const DEFAULT_GRAPHQL_MAX_ATTEMPTS: u32 = 4;
@@ -34,32 +33,43 @@ query SonariCensusCheckpointBySequence($sequenceNumber: UInt53!) {
   }
 }
 "#;
-const CELL_COUNT_INDEX_EVENTS_QUERY: &str = r#"
-query SonariCensusCellCountIndexEvents($eventType: String!, $first: Int!, $after: String) {
-  events(filter: { type: $eventType }, first: $first, after: $after) {
-    nodes {
+const CELL_COUNT_INDEX_OBJECT_QUERY: &str = r#"
+query SonariCensusCellCountIndexObject($indexId: SuiAddress!, $checkpoint: UInt53!, $first: Int!, $after: String) {
+  object(address: $indexId, atCheckpoint: $checkpoint) {
+    address
+    asMoveObject {
       contents {
+        type {
+          repr
+        }
         json
       }
     }
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
-  }
-}
-"#;
-const CELL_COUNT_SHARD_EVENTS_QUERY: &str = r#"
-query SonariCensusCellCountShardEvents($eventType: String!, $first: Int!, $after: String) {
-  events(filter: { type: $eventType }, first: $first, after: $after) {
-    nodes {
-      contents {
-        json
+    dynamicFields(first: $first, after: $after) {
+      nodes {
+        name {
+          type {
+            repr
+          }
+          json
+        }
+        value {
+          __typename
+          ... on MoveObject {
+            address
+            contents {
+              type {
+                repr
+              }
+              json
+            }
+          }
+        }
       }
-    }
-    pageInfo {
-      hasNextPage
-      endCursor
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
     }
   }
 }
@@ -225,47 +235,28 @@ impl CensusGraphqlClient {
         let census_checkpoint = self
             .resolve_latest_checkpoint_at_or_before(bundle.occurred_at_ms, config.max_attempts)?;
 
-        let index_event_type = format!(
-            "{}::cell_count_index::CellCountIndexPublished",
-            bundle.package_id
-        );
-        let index_response = self.collect_event_pages(
-            CELL_COUNT_INDEX_EVENTS_QUERY,
-            &index_event_type,
-            config.max_attempts,
-        )?;
-        let index = parse_cell_count_index_metadata(
-            &index_response,
+        let grouped = group_affected_cells_by_shard(&bundle.affected_cells.affected_cells)?;
+        let shard_object_ids = self.resolve_cell_count_index_object(
+            &bundle.cell_count_index_id,
             &bundle.package_id,
             &bundle.membership_registry_id,
-        )?;
-
-        let grouped = group_affected_cells_by_shard(&bundle.affected_cells.affected_cells)?;
-        let required_shard_ids = grouped.keys().copied().collect::<HashSet<_>>();
-        let shard_event_type = format!(
-            "{}::cell_count_index::CellCountShardPublished",
-            bundle.package_id
-        );
-        let shard_response = self.collect_event_pages(
-            CELL_COUNT_SHARD_EVENTS_QUERY,
-            &shard_event_type,
+            census_checkpoint,
             config.max_attempts,
         )?;
-        let shard_object_ids = parse_cell_count_shard_object_ids(
-            &shard_response,
-            &bundle.package_id,
-            &index.cell_count_index_id,
-            &required_shard_ids,
-        )?;
-        ensure_all_required_shards_resolved(&required_shard_ids, &shard_object_ids)?;
 
         let mut counted_cells = Vec::new();
         for (shard_id, cells) in grouped {
-            let shard_object_id = shard_object_ids.get(&shard_id).ok_or_else(|| {
-                CensusError::InvalidPayload(format!(
-                    "CellCountShardPublished event not found for shard_id {shard_id}"
-                ))
-            })?;
+            let Some(shard_object_id) = shard_object_ids.get(&shard_id) else {
+                counted_cells.extend(cells.into_iter().map(|(h3_cell, cell_band)| {
+                    counted_cell_from_snapshot(CountedCellSnapshot {
+                        h3_cell,
+                        cell_band,
+                        shard_id,
+                        active_count: 0,
+                    })
+                }));
+                continue;
+            };
             for batch in shard_count_batches(&cells, &config)? {
                 let response = self.query_json(
                     SHARD_COUNTS_QUERY,
@@ -281,7 +272,7 @@ impl CensusGraphqlClient {
         }
 
         Ok(CensusResolvedSnapshot {
-            cell_count_index_id: index.cell_count_index_id,
+            cell_count_index_id: bundle.cell_count_index_id.clone(),
             census_checkpoint,
             counted_cells,
         })
@@ -343,29 +334,54 @@ impl CensusGraphqlClient {
         parse_checkpoint_node(&response)
     }
 
-    fn collect_event_pages(
+    fn resolve_cell_count_index_object(
         &self,
-        query: &str,
-        event_type: &str,
+        cell_count_index_id: &str,
+        expected_package_id: &str,
+        expected_membership_registry_id: &str,
+        checkpoint: u64,
         max_attempts: u32,
-    ) -> Result<Value, CensusError> {
+    ) -> Result<HashMap<u64, String>, CensusError> {
+        validate_object_id(cell_count_index_id, "cell_count_index_id")?;
         let mut after: Option<String> = None;
-        let mut nodes = Vec::new();
+        let mut shards = HashMap::new();
         for _ in 0..MAX_GRAPHQL_PAGES {
             let response = self.query_json(
-                query,
-                event_page_variables(event_type, after.as_deref()),
+                CELL_COUNT_INDEX_OBJECT_QUERY,
+                cell_count_index_object_variables(
+                    cell_count_index_id,
+                    checkpoint,
+                    after.as_deref(),
+                ),
                 max_attempts,
             )?;
-            nodes.extend(graphql_event_nodes(&response)?.iter().cloned());
-            let page_info = read_event_page_info(&response, "GraphQL events pageInfo")?;
+            if after.is_none() {
+                parse_cell_count_index_object_metadata(
+                    &response,
+                    expected_package_id,
+                    expected_membership_registry_id,
+                    cell_count_index_id,
+                )?;
+            }
+            for (shard_id, object_id) in parse_cell_count_index_dynamic_shards(
+                &response,
+                expected_package_id,
+                cell_count_index_id,
+            )? {
+                if shards.insert(shard_id, object_id).is_some() {
+                    return Err(CensusError::InvalidPayload(format!(
+                        "duplicate CellCountShard object for shard_id {shard_id}"
+                    )));
+                }
+            }
+            let page_info = read_object_dynamic_fields_page_info(&response)?;
             if !page_info.has_next_page {
-                return Ok(event_response_from_nodes(nodes));
+                return Ok(shards);
             }
             after = Some(page_info.end_cursor);
         }
         Err(CensusError::InvalidPayload(
-            "Sui event pagination exceeded safety limit".to_owned(),
+            "Sui dynamic field pagination exceeded safety limit".to_owned(),
         ))
     }
 
@@ -437,20 +453,6 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
-fn ensure_all_required_shards_resolved(
-    required_shard_ids: &HashSet<u64>,
-    shard_object_ids: &HashMap<u64, String>,
-) -> Result<(), CensusError> {
-    for shard_id in required_shard_ids {
-        if !shard_object_ids.contains_key(shard_id) {
-            return Err(CensusError::InvalidPayload(format!(
-                "CellCountShardPublished event not found for shard_id {shard_id}"
-            )));
-        }
-    }
-    Ok(())
-}
-
 fn counted_cell_from_snapshot(snapshot: CountedCellSnapshot) -> CountedCell {
     CountedCell {
         h3_cell: snapshot.h3_cell.to_string(),
@@ -460,14 +462,20 @@ fn counted_cell_from_snapshot(snapshot: CountedCellSnapshot) -> CountedCell {
     }
 }
 
-fn event_page_variables(event_type: &str, after: Option<&str>) -> Value {
+fn cell_count_index_object_variables(
+    cell_count_index_id: &str,
+    checkpoint: u64,
+    after: Option<&str>,
+) -> Value {
     serde_json::json!({
-        "eventType": event_type,
-        "first": EVENT_PAGE_SIZE,
+        "indexId": normalize_object_id(cell_count_index_id),
+        "checkpoint": checkpoint,
+        "first": DEFAULT_CELL_COUNT_BATCH_SIZE,
         "after": after,
     })
 }
 
+#[cfg(test)]
 fn event_response_from_nodes(nodes: Vec<Value>) -> Value {
     serde_json::json!({
         "data": {
@@ -483,8 +491,23 @@ struct EventPageInfo {
     end_cursor: String,
 }
 
+#[cfg(test)]
 fn read_event_page_info(response: &Value, field: &str) -> Result<EventPageInfo, CensusError> {
     let page_info = read_path(response, &["data", "events", "pageInfo"], field)?;
+    let has_next_page = read_bool_field(page_info, "hasNextPage")?;
+    let end_cursor = read_cursor_field(page_info, "endCursor", has_next_page)?;
+    Ok(EventPageInfo {
+        has_next_page,
+        end_cursor,
+    })
+}
+
+fn read_object_dynamic_fields_page_info(response: &Value) -> Result<EventPageInfo, CensusError> {
+    let page_info = read_path(
+        response,
+        &["data", "object", "dynamicFields", "pageInfo"],
+        "GraphQL dynamicFields pageInfo",
+    )?;
     let has_next_page = read_bool_field(page_info, "hasNextPage")?;
     let end_cursor = read_cursor_field(page_info, "endCursor", has_next_page)?;
     Ok(EventPageInfo {
@@ -566,6 +589,68 @@ pub fn parse_cell_count_index_metadata(
     })
 }
 
+pub fn parse_cell_count_index_object_metadata(
+    response: &Value,
+    expected_package_id: &str,
+    expected_membership_registry_id: &str,
+    expected_cell_count_index_id: &str,
+) -> Result<CellCountIndexMetadata, CensusError> {
+    validate_object_id(expected_package_id, "package_id")?;
+    validate_object_id(expected_membership_registry_id, "membership_registry_id")?;
+    validate_object_id(expected_cell_count_index_id, "cell_count_index_id")?;
+    let object = read_path(
+        response,
+        &["data", "object"],
+        "GraphQL CellCountIndex object",
+    )?;
+    if object.is_null() {
+        return Err(CensusError::InvalidPayload(
+            "CellCountIndex object not found at census checkpoint".to_owned(),
+        ));
+    }
+    let address = read_string_path(object, &["address"], "CellCountIndex address")?;
+    if !same_object_id(address, expected_cell_count_index_id) {
+        return Err(CensusError::InvalidPayload(
+            "CellCountIndex object address mismatch".to_owned(),
+        ));
+    }
+    let contents = read_path(
+        object,
+        &["asMoveObject", "contents"],
+        "CellCountIndex contents",
+    )?;
+    let expected_type = format!("{expected_package_id}::cell_count_index::CellCountIndex");
+    let actual_type = read_string_path(contents, &["type", "repr"], "CellCountIndex type")?;
+    if actual_type != expected_type {
+        return Err(CensusError::InvalidPayload(
+            "CellCountIndex type mismatch".to_owned(),
+        ));
+    }
+    let json = read_path(contents, &["json"], "CellCountIndex contents.json")?;
+    let membership_registry_id = read_object_id_field(json, "membership_registry_id")?;
+    if !same_object_id(&membership_registry_id, expected_membership_registry_id) {
+        return Err(CensusError::InvalidPayload(
+            "CellCountIndex membership_registry_id mismatch".to_owned(),
+        ));
+    }
+    let metadata = CellCountIndexMetadata {
+        cell_count_index_id: normalize_object_id(expected_cell_count_index_id),
+        h3_resolution: read_u8_field(json, "h3_resolution")?,
+        shard_count: read_u64_field(json, "shard_count")?,
+    };
+    if metadata.h3_resolution != crate::H3_RESOLUTION {
+        return Err(CensusError::InvalidPayload(
+            "CellCountIndex h3_resolution must be 7".to_owned(),
+        ));
+    }
+    if metadata.shard_count != crate::SHARD_COUNT {
+        return Err(CensusError::InvalidPayload(
+            "CellCountIndex shard_count must be 4096".to_owned(),
+        ));
+    }
+    Ok(metadata)
+}
+
 pub fn parse_cell_count_shard_object_ids(
     response: &Value,
     expected_package_id: &str,
@@ -592,6 +677,69 @@ pub fn parse_cell_count_shard_object_ids(
         if shards.insert(shard_id, shard_object_id).is_some() {
             return Err(CensusError::InvalidPayload(format!(
                 "duplicate CellCountShardPublished event for shard_id {shard_id}"
+            )));
+        }
+    }
+    Ok(shards)
+}
+
+pub fn parse_cell_count_index_dynamic_shards(
+    response: &Value,
+    expected_package_id: &str,
+    expected_cell_count_index_id: &str,
+) -> Result<HashMap<u64, String>, CensusError> {
+    validate_object_id(expected_package_id, "package_id")?;
+    validate_object_id(expected_cell_count_index_id, "cell_count_index_id")?;
+    let nodes = read_array_path(
+        response,
+        &["data", "object", "dynamicFields", "nodes"],
+        "CellCountIndex dynamicFields nodes",
+    )?;
+    let expected_shard_type = format!("{expected_package_id}::cell_count_index::CellCountShard");
+    let mut shards = HashMap::new();
+    for node in nodes {
+        let shard_id = read_u64_path(node, &["name", "json"], "CellCountShard dynamic field name")?;
+        if shard_id >= crate::SHARD_COUNT {
+            return Err(CensusError::InvalidPayload(
+                "CellCountShard shard_id is out of range".to_owned(),
+            ));
+        }
+        let value = read_path(node, &["value"], "CellCountShard dynamic field value")?;
+        if read_string_path(value, &["__typename"], "CellCountShard value typename")?
+            != "MoveObject"
+        {
+            return Err(CensusError::InvalidPayload(
+                "CellCountShard dynamic field value must be MoveObject".to_owned(),
+            ));
+        }
+        let shard_object_id = read_string_path(value, &["address"], "CellCountShard address")?;
+        validate_object_id(shard_object_id, "shard_object_id")?;
+        let contents = read_path(value, &["contents"], "CellCountShard contents")?;
+        let actual_type = read_string_path(contents, &["type", "repr"], "CellCountShard type")?;
+        if actual_type != expected_shard_type {
+            return Err(CensusError::InvalidPayload(
+                "CellCountShard type mismatch".to_owned(),
+            ));
+        }
+        let json = read_path(contents, &["json"], "CellCountShard contents.json")?;
+        let index_id = read_object_id_field(json, "index_id")?;
+        if !same_object_id(&index_id, expected_cell_count_index_id) {
+            return Err(CensusError::InvalidPayload(
+                "CellCountShard index_id mismatch".to_owned(),
+            ));
+        }
+        let json_shard_id = read_u64_field(json, "shard_id")?;
+        if json_shard_id != shard_id {
+            return Err(CensusError::InvalidPayload(
+                "CellCountShard shard_id mismatch".to_owned(),
+            ));
+        }
+        if shards
+            .insert(shard_id, normalize_object_id(shard_object_id))
+            .is_some()
+        {
+            return Err(CensusError::InvalidPayload(format!(
+                "duplicate CellCountShard object for shard_id {shard_id}"
             )));
         }
     }
@@ -956,9 +1104,11 @@ mod tests {
     use super::{
         CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, CENSUS_GRAPHQL_NETWORK_KEY, CensusGraphqlClient,
         ShardCountReadConfig, SuiGraphqlNetwork, event_response_from_nodes, graphql_event_nodes,
-        group_affected_cells_by_shard, h3_cell_dynamic_field_key, parse_cell_count_index_metadata,
-        parse_cell_count_shard_object_ids, parse_checkpoint_node, parse_rfc3339_utc_ms,
-        parse_shard_count_response, read_event_page_info, shard_count_batches,
+        group_affected_cells_by_shard, h3_cell_dynamic_field_key,
+        parse_cell_count_index_dynamic_shards, parse_cell_count_index_metadata,
+        parse_cell_count_index_object_metadata, parse_cell_count_shard_object_ids,
+        parse_checkpoint_node, parse_rfc3339_utc_ms, parse_shard_count_response,
+        read_event_page_info, read_object_dynamic_fields_page_info, shard_count_batches,
         shard_count_query_variables,
     };
     use crate::AffectedCell;
@@ -1179,6 +1329,107 @@ mod tests {
     }
 
     #[test]
+    fn index_object_parser_validates_metadata_and_type() {
+        let package_id = object_id("aa");
+        let membership_registry_id = object_id("22");
+        let index_id = object_id("33");
+        let response =
+            index_object_response(&package_id, &membership_registry_id, &index_id, vec![]);
+
+        let metadata = parse_cell_count_index_object_metadata(
+            &response,
+            &package_id,
+            &membership_registry_id,
+            &index_id,
+        )
+        .unwrap();
+
+        assert_eq!(metadata.cell_count_index_id, index_id);
+        assert_eq!(metadata.h3_resolution, 7);
+        assert_eq!(metadata.shard_count, 4_096);
+    }
+
+    #[test]
+    fn index_object_parser_fails_closed_on_mismatch() {
+        let package_id = object_id("aa");
+        let membership_registry_id = object_id("22");
+        let index_id = object_id("33");
+        let response = index_object_response(&package_id, &object_id("44"), &index_id, vec![]);
+
+        let error = parse_cell_count_index_object_metadata(
+            &response,
+            &package_id,
+            &membership_registry_id,
+            &index_id,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("membership_registry_id"));
+    }
+
+    #[test]
+    fn dynamic_shard_parser_reads_and_validates_shards() {
+        let package_id = object_id("aa");
+        let index_id = object_id("33");
+        let shard_object_id = object_id("44");
+        let response = index_object_response(
+            &package_id,
+            &object_id("22"),
+            &index_id,
+            vec![dynamic_shard_node(
+                &package_id,
+                &index_id,
+                10,
+                &shard_object_id,
+            )],
+        );
+
+        let shards =
+            parse_cell_count_index_dynamic_shards(&response, &package_id, &index_id).unwrap();
+
+        assert_eq!(shards.get(&10), Some(&shard_object_id));
+    }
+
+    #[test]
+    fn dynamic_shard_parser_fails_closed_on_duplicate_and_mismatch() {
+        let package_id = object_id("aa");
+        let index_id = object_id("33");
+        let response = index_object_response(
+            &package_id,
+            &object_id("22"),
+            &index_id,
+            vec![
+                dynamic_shard_node(&package_id, &index_id, 10, &object_id("44")),
+                dynamic_shard_node(&package_id, &index_id, 10, &object_id("45")),
+            ],
+        );
+        assert!(
+            parse_cell_count_index_dynamic_shards(&response, &package_id, &index_id)
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate")
+        );
+
+        let response = index_object_response(
+            &package_id,
+            &object_id("22"),
+            &index_id,
+            vec![dynamic_shard_node(
+                &package_id,
+                &object_id("99"),
+                10,
+                &object_id("44"),
+            )],
+        );
+        assert!(
+            parse_cell_count_index_dynamic_shards(&response, &package_id, &index_id)
+                .unwrap_err()
+                .to_string()
+                .contains("index_id")
+        );
+    }
+
+    #[test]
     fn shard_parser_returns_only_required_shards_for_matching_index() {
         let package_id = object_id("aa");
         let index_id = object_id("33");
@@ -1262,6 +1513,20 @@ mod tests {
             }
         });
         let first_page_info = read_event_page_info(&first_page, "GraphQL events pageInfo").unwrap();
+        let dynamic_page_info = read_object_dynamic_fields_page_info(&serde_json::json!({
+            "data": {
+                "object": {
+                    "dynamicFields": {
+                        "nodes": [],
+                        "pageInfo": {
+                            "hasNextPage": true,
+                            "endCursor": "dynamic-cursor-1"
+                        }
+                    }
+                }
+            }
+        }))
+        .unwrap();
         let mut nodes = graphql_event_nodes(&first_page).unwrap().clone();
         nodes.extend(graphql_event_nodes(&second_page).unwrap().iter().cloned());
         let merged = event_response_from_nodes(nodes);
@@ -1276,6 +1541,7 @@ mod tests {
 
         assert!(first_page_info.has_next_page);
         assert_eq!(first_page_info.end_cursor, "event-cursor-1");
+        assert_eq!(dynamic_page_info.end_cursor, "dynamic-cursor-1");
         assert_eq!(shards.get(&10), Some(&object_id("10")));
         assert_eq!(shards.get(&20), Some(&object_id("20")));
     }
@@ -1443,6 +1709,63 @@ mod tests {
 
     fn object_id(byte: &str) -> String {
         format!("0x{}", byte.repeat(32))
+    }
+
+    fn index_object_response(
+        package_id: &str,
+        membership_registry_id: &str,
+        index_id: &str,
+        dynamic_nodes: Vec<serde_json::Value>,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "data": {
+                "object": {
+                    "address": index_id,
+                    "asMoveObject": {
+                        "contents": {
+                            "type": { "repr": format!("{package_id}::cell_count_index::CellCountIndex") },
+                            "json": {
+                                "membership_registry_id": membership_registry_id,
+                                "h3_resolution": 7,
+                                "shard_count": "4096"
+                            }
+                        }
+                    },
+                    "dynamicFields": {
+                        "nodes": dynamic_nodes,
+                        "pageInfo": {
+                            "hasNextPage": false,
+                            "endCursor": null
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    fn dynamic_shard_node(
+        package_id: &str,
+        index_id: &str,
+        shard_id: u64,
+        shard_object_id: &str,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "name": {
+                "type": { "repr": "u64" },
+                "json": shard_id.to_string()
+            },
+            "value": {
+                "__typename": "MoveObject",
+                "address": shard_object_id,
+                "contents": {
+                    "type": { "repr": format!("{package_id}::cell_count_index::CellCountShard") },
+                    "json": {
+                        "index_id": index_id,
+                        "shard_id": shard_id.to_string()
+                    }
+                }
+            }
+        })
     }
 
     fn affected_cell(h3_index: &str, cell_band: u64) -> AffectedCell {
