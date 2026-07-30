@@ -73,6 +73,7 @@ async function main(): Promise<void> {
     const item = isRecord(row) && isRecord(row.Item) ? row.Item : {};
     const teeResultSummary = readTeeResultSummary(item);
     const sourceArtifactS3Keys = readDynamoJsonStringArray(item, "source_artifact_s3_keys_json");
+    const relayerObjectId = readDynamoString(item, "relayer_object_id");
     const sourceArchiveSummary = {
         source_archive_status: readDynamoString(item, "source_archive_status"),
         source_archive_error_code: readDynamoString(item, "source_archive_error_code"),
@@ -88,7 +89,8 @@ async function main(): Promise<void> {
         relayer_status: readDynamoString(item, "relayer_status"),
         relayer_mode: readDynamoString(item, "relayer_mode"),
         relayer_digest: readDynamoString(item, "relayer_digest"),
-        disaster_event_object_id: readDynamoString(item, "disaster_event_object_id"),
+        relayer_object_id: relayerObjectId,
+        disaster_event_object_id: relayerObjectId,
         floor_census_status: readDynamoString(item, "floor_census_status"),
         floor_census_digest: readDynamoString(item, "floor_census_digest"),
         floor_census_counts: readDynamoJsonStringArray(item, "floor_census_counts_json"),
