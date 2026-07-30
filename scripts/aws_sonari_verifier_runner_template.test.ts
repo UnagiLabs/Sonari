@@ -372,6 +372,23 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(scheduleStateUsageCount).toBe(2);
     });
 
+    it("keeps watcher Lambda timeouts at 180 seconds", async () => {
+        const template = await readTemplate();
+        const watcherStart = template.indexOf("WatcherLambda:");
+        const manualWatcherStart = template.indexOf("ManualWatcherLambda:");
+        const manualWatcherEnd = template.indexOf("ManualWatcherFunctionUrl:", manualWatcherStart);
+
+        expect(watcherStart).toBeGreaterThan(-1);
+        expect(manualWatcherStart).toBeGreaterThan(watcherStart);
+        expect(manualWatcherEnd).toBeGreaterThan(manualWatcherStart);
+
+        const watcher = template.slice(watcherStart, manualWatcherStart);
+        const manualWatcher = template.slice(manualWatcherStart, manualWatcherEnd);
+
+        expect(watcher).toContain("Timeout: 180");
+        expect(manualWatcher).toContain("Timeout: 180");
+    });
+
     it("keeps only the earthquake Walrus blob-id CLI in the runner environment", async () => {
         const template = await readTemplate();
         const runnerLaunchTemplate = template.slice(
