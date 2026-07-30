@@ -232,11 +232,14 @@ describe("AWS earthquake wrapper verification script", () => {
         );
         expect(command).toContain('sha256="$(sha256sum "$result_file" | awk \'{ print $1 }\')"');
         expect(command).toContain('bytes="$(wc -c < "$result_file" | tr -d \'[:space:]\')"');
-        expect(command).toContain("JSON.stringify({");
-        expect(command).toContain('status: "ok"');
-        expect(command).toContain("result_s3_uri: process.env.RESULT_S3_URI");
-        expect(command).toContain("sha256: process.env.RESULT_SHA256");
-        expect(command).toContain("bytes: Number(process.env.RESULT_BYTES)");
+        expect(command).not.toContain("node -e");
+        expect(command).toContain(
+            'printf \'{"status":"ok","result_s3_uri":%s,"sha256":"%s","bytes":%s}\\n\'',
+        );
+        expect(command).toContain(
+            "'\"s3://runner-results/results/earthquake-wrapper-results/run-123.json\"'",
+        );
+        expect(command).toContain('"$sha256" "$bytes"');
         expect(command).not.toContain("CommandId");
     });
 

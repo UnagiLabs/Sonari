@@ -285,6 +285,7 @@ export function buildProcessDataS3UploadCommand(input: {
     runId: string;
 }): string {
     const resultKey = processDataS3ResultKey(input.runId);
+    const resultS3UriJson = JSON.stringify(`s3://${input.bucket}/${resultKey}`);
     return [
         "set -euo pipefail",
         'result_file="$(mktemp /tmp/sonari-earthquake-wrapper-result.XXXXXX.json)"',
@@ -295,7 +296,7 @@ export function buildProcessDataS3UploadCommand(input: {
         'aws s3 cp --only-show-errors "$result_file" "s3://$result_bucket/$result_key"',
         'sha256="$(sha256sum "$result_file" | awk \'{ print $1 }\')"',
         'bytes="$(wc -c < "$result_file" | tr -d \'[:space:]\')"',
-        `RESULT_S3_URI="s3://$result_bucket/$result_key" RESULT_SHA256="$sha256" RESULT_BYTES="$bytes" node -e ${shellSingleQuote('process.stdout.write(JSON.stringify({ status: "ok", result_s3_uri: process.env.RESULT_S3_URI, sha256: process.env.RESULT_SHA256, bytes: Number(process.env.RESULT_BYTES) }))')}`,
+        `printf '{"status":"ok","result_s3_uri":%s,"sha256":"%s","bytes":%s}\\n' ${shellSingleQuote(resultS3UriJson)} "$sha256" "$bytes"`,
     ].join("\n");
 }
 
