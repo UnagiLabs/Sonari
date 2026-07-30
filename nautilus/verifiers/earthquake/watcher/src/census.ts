@@ -156,6 +156,7 @@ export interface FloorCensusInputBundle {
     campaign_id: string;
     disaster_event_id: string;
     membership_registry_id: string;
+    cell_count_index_id: string;
     affected_cells: AffectedCellsArtifact;
 }
 
@@ -395,6 +396,7 @@ export async function buildFloorCensusInputBundle(input: {
     campaignId: string;
     disasterEventId: string;
     membershipRegistryId: string;
+    cellCountIndexId: string;
     issuedAtMs: number;
     affectedCellsResolver?: FloorCensusAffectedCellsResolver | undefined;
 }): Promise<FloorCensusInputBundle> {
@@ -405,6 +407,7 @@ export async function buildFloorCensusInputBundle(input: {
     validateObjectId(input.campaignId, "campaign_id");
     validateObjectId(input.disasterEventId, "disaster_event_id");
     validateObjectId(input.membershipRegistryId, "membership_registry_id");
+    validateObjectId(input.cellCountIndexId, "cell_count_index_id");
     validateObjectId(input.packageId, "package_id");
     validateSafeInteger(input.issuedAtMs, "issued_at_ms");
 
@@ -422,6 +425,7 @@ export async function buildFloorCensusInputBundle(input: {
         campaign_id: input.campaignId,
         disaster_event_id: input.disasterEventId,
         membership_registry_id: input.membershipRegistryId,
+        cell_count_index_id: input.cellCountIndexId,
         affected_cells: affectedCells,
     };
 }
@@ -646,6 +650,7 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
             campaignId: campaign.campaignId,
             disasterEventId: input.disasterEventId,
             membershipRegistryId: this.config.membershipRegistry,
+            cellCountIndexId: this.config.cellCountIndex,
             issuedAtMs: this.config.now?.() ?? Date.now(),
         });
         const signed = parseFloorCensusTeeOutput(

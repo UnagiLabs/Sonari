@@ -176,6 +176,7 @@ describe("floor census core", () => {
             campaignId: `0x${"44".repeat(32)}`,
             disasterEventId: `0x${"55".repeat(32)}`,
             membershipRegistryId,
+            cellCountIndexId,
             issuedAtMs: 1_800_000_001_000,
         });
 
@@ -189,6 +190,7 @@ describe("floor census core", () => {
             campaign_id: `0x${"44".repeat(32)}`,
             disaster_event_id: `0x${"55".repeat(32)}`,
             membership_registry_id: membershipRegistryId,
+            cell_count_index_id: cellCountIndexId,
         });
         expect(bundle.affected_cells).toEqual({ ...affectedCells, event_revision: 7 });
         expect("home_cell_events" in bundle).toBe(false);
@@ -215,6 +217,7 @@ describe("floor census core", () => {
             campaignId: `0x${"44".repeat(32)}`,
             disasterEventId: `0x${"55".repeat(32)}`,
             membershipRegistryId,
+            cellCountIndexId,
             issuedAtMs: 1_800_000_001_000,
             affectedCellsResolver: resolver,
         });
@@ -226,6 +229,20 @@ describe("floor census core", () => {
                 evidenceManifest: undefined,
             },
         ]);
+    });
+
+    it("fails closed when the configured cell count index is not an object id", async () => {
+        await expect(
+            buildFloorCensusInputBundle({
+                result: finalizedResultForCensus(),
+                packageId: `0x${"99".repeat(32)}`,
+                campaignId: `0x${"44".repeat(32)}`,
+                disasterEventId: `0x${"55".repeat(32)}`,
+                membershipRegistryId,
+                cellCountIndexId: "not-an-object-id",
+                issuedAtMs: 1_800_000_001_000,
+            }),
+        ).rejects.toThrow("cell_count_index_id");
     });
 
     it("parses Census TEE output into raw submit bytes and counts", () => {
@@ -827,6 +844,7 @@ describe("TeeFloorCensusAdapter", () => {
         expect(tee.inputs).toHaveLength(1);
         expect(tee.inputs[0]?.payload.package_id).toBe(packageId);
         expect(tee.inputs[0]?.payload.membership_registry_id).toBe(membershipRegistryId);
+        expect(tee.inputs[0]?.payload.cell_count_index_id).toBe(cellCountIndexId);
         expect("home_cell_events" in (tee.inputs[0]?.payload ?? {})).toBe(false);
         expect("active_lineages" in (tee.inputs[0]?.payload ?? {})).toBe(false);
         expect("counted_cells_root" in (tee.inputs[0]?.payload ?? {})).toBe(false);
@@ -1063,7 +1081,11 @@ class RecordingFloorCensusSubmitClient implements FloorCensusSubmitClient {
 class RecordingFloorCensusTeeClient {
     readonly inputs: Array<{
         action: "process_data";
-        payload: { package_id: string; membership_registry_id: string };
+        payload: {
+            package_id: string;
+            membership_registry_id: string;
+            cell_count_index_id: string;
+        };
         registration_metadata: EnclaveVerificationMetadata;
     }> = [];
 
@@ -1071,7 +1093,11 @@ class RecordingFloorCensusTeeClient {
         this.inputs.push(
             input as {
                 action: "process_data";
-                payload: { package_id: string; membership_registry_id: string };
+                payload: {
+                    package_id: string;
+                    membership_registry_id: string;
+                    cell_count_index_id: string;
+                };
                 registration_metadata: EnclaveVerificationMetadata;
             },
         );
