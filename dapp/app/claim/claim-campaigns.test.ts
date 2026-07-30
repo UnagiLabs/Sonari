@@ -11,10 +11,9 @@ import {
     readClaimEligibility,
     readClaimCampaigns,
 } from "./claim-campaigns";
-import type { MoveEvent } from "../chain/graphql-event-client";
 
 const PACKAGE_ID = `0x${"ab".repeat(32)}`;
-const CAMPAIGN_TYPE = `${PACKAGE_ID}::campaign::CampaignCreated`;
+const CAMPAIGN_TYPE = `${PACKAGE_ID}::campaign::Campaign`;
 const CAMPAIGN_ID = `0x${"11".repeat(32)}`;
 const DISASTER_EVENT_ID = `0x${"22".repeat(32)}`;
 const PASS_LINEAGE_ID = `0x${"44".repeat(32)}`;
@@ -33,10 +32,6 @@ function campaignCreatedParsedJson(
         claim_end_ms: "2000",
         ...overrides,
     };
-}
-
-function moveEvent(json: Record<string, unknown>, id = "digest:0"): MoveEvent {
-    return { id, timestampMs: 1_700_000_000_000, json };
 }
 
 function campaignObjectJson(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -490,25 +485,23 @@ describe("deriveClaimEligibility", () => {
 });
 
 describe("readClaimCampaigns", () => {
-    it("queries CampaignCreated events, follows pages, dedupes, and reads objects", async () => {
+    it("queries Campaign objects by type, follows pages, dedupes, and reads objects without events", async () => {
         const nextCursor = "next-page";
-        const queryMoveEvents = vi.fn(async (input: {
+        const queryMoveEvents = vi.fn();
+        const queryObjectsByType = vi.fn(async (input: {
             type: string;
             cursor?: string | null;
         }) => {
             expect(input.type).toBe(CAMPAIGN_TYPE);
             if (input.cursor === nextCursor) {
                 return {
-                    data: [moveEvent(campaignCreatedParsedJson({ claim_end_ms: "1000" }), "digest:1")],
+                    data: [CAMPAIGN_ID],
                     hasNextPage: false,
                     nextCursor: null,
                 };
             }
             return {
-                data: [
-                    moveEvent(campaignCreatedParsedJson()),
-                    moveEvent(campaignCreatedParsedJson()),
-                ],
+                data: [CAMPAIGN_ID, CAMPAIGN_ID],
                 hasNextPage: true,
                 nextCursor,
             };
@@ -522,7 +515,7 @@ describe("readClaimCampaigns", () => {
                         : disasterEventObjectJson(),
             })),
         }));
-        const client: ClaimCampaignReadClient = { queryMoveEvents, getObjects };
+        const client: ClaimCampaignReadClient = { queryMoveEvents, queryObjectsByType, getObjects };
 
         const result = await readClaimCampaigns(client, {
             packageId: PACKAGE_ID,
@@ -535,13 +528,15 @@ describe("readClaimCampaigns", () => {
         }
         expect(result.campaigns).toHaveLength(1);
         expect(result.campaigns[0]?.campaignId).toBe(CAMPAIGN_ID);
-        expect(queryMoveEvents).toHaveBeenCalledTimes(2);
+        expect(queryMoveEvents).not.toHaveBeenCalled();
+        expect(queryObjectsByType).toHaveBeenCalledTimes(2);
         expect(getObjects).toHaveBeenCalledTimes(2);
     });
 
     it("returns error when the package id is missing or RPC fails", async () => {
         const client: ClaimCampaignReadClient = {
-            queryMoveEvents: vi.fn(async () => {
+            queryMoveEvents: vi.fn(),
+            queryObjectsByType: vi.fn(async () => {
                 throw new Error("rpc unavailable");
             }),
             getObjects: vi.fn(),
@@ -571,6 +566,7 @@ describe("readClaimEligibility", () => {
             .mockResolvedValueOnce({ objects: [] });
         const client: ClaimCampaignReadClient = {
             queryMoveEvents: vi.fn(),
+            queryObjectsByType: vi.fn(),
             getObjects,
         };
 

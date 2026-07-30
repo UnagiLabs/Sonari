@@ -52,4 +52,15 @@ describe("AWS earthquake manual smoke summary", () => {
         expect(script).toContain('readDynamoJsonStringArray(item, "floor_census_counts_json")');
         expect(script).toContain('readDynamoString(item, "floor_census_error_message")');
     });
+
+    it("reports the relayer object id from the deployed DynamoDB attribute", () => {
+        const script = readFileSync(
+            new URL("./smoke-earthquake-manual.ts", import.meta.url),
+            "utf8",
+        );
+
+        expect(script).toContain('readDynamoString(item, "relayer_object_id")');
+        expect(script).not.toContain('readDynamoString(item, "disaster_event_object_id")');
+        expect(script).toContain("disaster_event_object_id: relayerObjectId");
+    });
 });

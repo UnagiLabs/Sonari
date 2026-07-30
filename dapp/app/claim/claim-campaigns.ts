@@ -1,15 +1,15 @@
 import { bcs } from "@mysten/sui/bcs";
 import { deriveDynamicFieldID, fromBase64 } from "@mysten/sui/utils";
-import type { MoveEventQueryClient } from "../chain/graphql-event-client";
+import type { GraphqlReadClient } from "../chain/graphql-event-client";
 
-const QUERY_EVENTS_PAGE_LIMIT = 100;
+const QUERY_OBJECTS_PAGE_LIMIT = 100;
 
 export interface ClaimCampaignObject {
     readonly objectId: string;
     readonly json: Record<string, unknown> | null;
 }
 
-export interface ClaimCampaignReadClient extends MoveEventQueryClient {
+export interface ClaimCampaignReadClient extends GraphqlReadClient {
     getObjects(input: {
         readonly objectIds: string[];
         readonly include: { readonly json: true };
@@ -465,12 +465,11 @@ export async function readClaimCampaigns(
     }
 
     try {
-        const events = await readCampaignCreatedEvents(
+        const campaignIds = await readCampaignObjectIds(
             client,
-            `${packageId}::campaign::CampaignCreated`,
+            `${packageId}::campaign::Campaign`,
         );
-        const byCampaignId = dedupeCampaignEvents(events);
-        const campaignObjects = await readCampaignObjects(client, [...byCampaignId.keys()]);
+        const campaignObjects = await readCampaignObjects(client, campaignIds);
         const disasterObjects = await readDisasterEventObjects(
             client,
             campaignObjects.map((campaign) => campaign.disasterEventId),
@@ -558,44 +557,33 @@ function derivePayoutKeyDynamicFieldId(input: {
     );
 }
 
-async function readCampaignCreatedEvents(
+async function readCampaignObjectIds(
     client: ClaimCampaignReadClient,
-    eventType: string,
-): Promise<CampaignCreatedEvent[]> {
-    const events: CampaignCreatedEvent[] = [];
+    type: string,
+): Promise<string[]> {
+    const ids: string[] = [];
+    const seen = new Set<string>();
     let cursor: string | null | undefined;
 
     for (;;) {
-        const response = await client.queryMoveEvents({
-            type: eventType,
+        const response = await client.queryObjectsByType({
+            type,
             ...(cursor !== undefined ? { cursor } : {}),
-            limit: QUERY_EVENTS_PAGE_LIMIT,
+            limit: QUERY_OBJECTS_PAGE_LIMIT,
         });
 
-        for (const item of response.data) {
-            const parsed = parseCampaignCreatedEvent(item.json);
-            if (parsed !== null) {
-                events.push(parsed);
+        for (const id of response.data) {
+            if (!seen.has(id)) {
+                seen.add(id);
+                ids.push(id);
             }
         }
 
         if (response.hasNextPage !== true || response.nextCursor == null) {
-            return events;
+            return ids;
         }
         cursor = response.nextCursor;
     }
-}
-
-function dedupeCampaignEvents(
-    events: readonly CampaignCreatedEvent[],
-): Map<string, CampaignCreatedEvent> {
-    const byCampaignId = new Map<string, CampaignCreatedEvent>();
-    for (const event of events) {
-        if (!byCampaignId.has(event.campaignId)) {
-            byCampaignId.set(event.campaignId, event);
-        }
-    }
-    return byCampaignId;
 }
 
 async function readCampaignObjects(

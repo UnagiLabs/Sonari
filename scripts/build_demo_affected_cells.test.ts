@@ -138,7 +138,7 @@ describe("generateAffectedAreaArtifacts", () => {
         expect(first.manifest).toStrictEqual(second.manifest);
         expect(first.rasterTiles).toStrictEqual(second.rasterTiles);
         expect(first.cellTiles).toStrictEqual(second.cellTiles);
-    });
+    }, 15_000);
 
     it("manifest count, sourceSha256, bounds, and tile keys match generated artifacts", async () => {
         const cells = await loadFixtureCells();

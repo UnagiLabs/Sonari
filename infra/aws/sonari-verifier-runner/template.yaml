@@ -1111,7 +1111,7 @@ Resources:
       Runtime: nodejs22.x
       Handler: dist/src/lambda.scheduledHandler
       Role: !GetAtt WatcherLambdaRole.Arn
-      Timeout: 60
+      Timeout: 180
       MemorySize: 256
       Code:
         S3Bucket: !Ref LambdaCodeS3Bucket
@@ -1130,7 +1130,7 @@ Resources:
       Runtime: nodejs22.x
       Handler: dist/src/lambda.manualHandler
       Role: !GetAtt WatcherLambdaRole.Arn
-      Timeout: 30
+      Timeout: 180
       MemorySize: 256
       Code:
         S3Bucket: !Ref LambdaCodeS3Bucket

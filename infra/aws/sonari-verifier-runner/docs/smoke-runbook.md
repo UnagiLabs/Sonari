@@ -46,7 +46,7 @@ aws stepfunctions list-executions \
   --max-results 1
 ```
 
-dry-run 設定の smoke では、`pnpm aws:smoke:earthquake-manual` が DynamoDB row から `source_archive_summary` を出力します。`source_archive_status` が `success` であること、`relayer_mode` が `dry_run` であること、`relayer_digest` と `disaster_event_object_id` が `null` であることを確認します。
+dry-run 設定の smoke では、`pnpm aws:smoke:earthquake-manual` が DynamoDB row から `source_archive_summary` を出力します。`source_archive_status` が `success` であること、`relayer_mode` が `dry_run` であること、`relayer_digest`、`relayer_object_id`、`disaster_event_object_id` が `null` であることを確認します。`disaster_event_object_id` は互換用 alias で、実DB属性は `relayer_object_id` です。
 
 archiver Lambda の CloudWatch logs では、source artifact ごとに Walrus store が成功していることを確認します。request/response summary には blob id だけを残し、token、wallet、config、private key は出しません。
 
@@ -71,6 +71,12 @@ ManualWatcher の smoke は、`pnpm aws:smoke:earthquake-manual` の終了だけ
 
 `pnpm aws:verify:earthquake-wrapper` の `process_data` 確認では、大きい wrapper 結果を SSM stdout から直接読みません。runner instance は結果本体を `RunnerResultBucketName` の `results/earthquake-wrapper-results/` prefix に保存し、SSM stdout には `result_s3_uri`、`sha256`、`bytes` の参照 JSON だけを出します。script は S3 object を一時ファイルへ取得し、hash と byte 数を確認してから `process_data` 結果として検証します。この artifact は stack の `ResultRetentionDays` に従って削除されます。
 
+runner instance 上の wrapper smoke helper は、EC2 に Node.js がある前提にしません。SSM で multiline command を渡す場合は JSON parameters file を使い、結果参照 JSON の生成は shell の範囲で完結させます。
+
+ManualWatcher / WatcherLambda は、Sui GraphQL、USGS、DynamoDB、Step Functions の確認を含むため 60 秒を超えることがあります。Lambda timeout は 180 秒を前提にし、Function URL や `aws lambda invoke` の応答だけで完了判定しません。ManualWatcher が 502/timeout で返っても、DynamoDB row の `next_retry_at_ms` が解除されている場合があります。その場合は `{"verifier_kind":"earthquake","trigger":"earthquake_runner_completion"}` を WatcherLambda に投入し、対象 workflow が開始されたことを Step Functions で確認します。
+
+緊急時に特定 USGS event を手動登録する場合は、まず `pnpm aws:verify:earthquake-wrapper -- --source-event-id <source_event_id>` で exact-ID の TEE結果を確認し、wrapper smoke では Sui submit しません。その後 `pnpm aws:smoke:earthquake-manual -- --source-event-id <source_event_id>` を実行し、必要に応じて safe completion trigger で due workflow を起動します。最後は成功/失敗に関係なく `pnpm aws:check-idle` で ASG desired capacity、EC2 active instance、Watcher/Batch schedules が安全側に戻っていることを確認します。
+
 成功判定は、対象 execution が terminal status になった後の DynamoDB row で行います。
 
 - Step Functions execution が `SUCCEEDED`
@@ -78,7 +84,8 @@ ManualWatcher の smoke は、`pnpm aws:smoke:earthquake-manual` の終了だけ
 - `relayer_mode` が `submit`
 - `relayer_status` が `succeeded`
 - `relayer_digest` が non-null
-- `disaster_event_object_id` または `relayer_object_id` が non-null
+- `relayer_object_id` が non-null
+- `disaster_event_object_id` が `relayer_object_id` と同値
 - Floor Census が有効な stack では `floor_census_status=succeeded`
 - Floor Census が有効な stack では `floor_census_digest` が non-null、`floor_census_counts_json` が 3 要素
 - SourceArchiver logs に Walrus store success と `registered` / `uploaded` / `certified` がある

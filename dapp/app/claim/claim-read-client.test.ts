@@ -5,6 +5,11 @@ import { createClaimReadClient, type EventQueryClient } from "./claim-read-clien
 function makeEventClient(): EventQueryClient & { queryMoveEvents: ReturnType<typeof vi.fn> } {
     return {
         queryMoveEvents: vi.fn(async () => ({ data: [], hasNextPage: false, nextCursor: null })),
+        queryObjectsByType: vi.fn(async () => ({
+            data: [],
+            hasNextPage: false,
+            nextCursor: null,
+        })),
     };
 }
 
@@ -21,6 +26,24 @@ describe("createClaimReadClient", () => {
         expect(eventClient.queryMoveEvents).toHaveBeenCalledWith(input);
         // gRPC 側は呼ばれない。
         expect(grpc.getObjects).not.toHaveBeenCalled();
+    });
+
+    it("queryObjectsByType は注入した GraphQL クライアントへ委譲する", async () => {
+        const eventClient = makeEventClient();
+        const grpc = { getObjects: vi.fn(), listOwnedObjects: vi.fn() };
+        const client = createClaimReadClient(grpc, eventClient);
+
+        const input = {
+            type: "0x1::campaign::Campaign",
+            cursor: "cursor-1",
+            limit: 6,
+        } as const;
+        await client.queryObjectsByType(input);
+
+        expect(eventClient.queryObjectsByType).toHaveBeenCalledTimes(1);
+        expect(eventClient.queryObjectsByType).toHaveBeenCalledWith(input);
+        expect(grpc.getObjects).not.toHaveBeenCalled();
+        expect(grpc.listOwnedObjects).not.toHaveBeenCalled();
     });
 
     it("getObjects は gRPC クライアントへ委譲する", async () => {

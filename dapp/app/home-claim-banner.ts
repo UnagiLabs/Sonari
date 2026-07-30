@@ -13,7 +13,7 @@ import { resolveMembershipDappGenesisObjects } from "./chain/genesis-objects";
 import { type ClaimBannerCta, selectClaimBannerCta } from "./home-claim-banner-state";
 import { type MembershipPassReadClient, readMembershipPass } from "./mypage/membership-pass-read";
 
-// 受け取り判定に必要な読み取りは、campaign 取得（GraphQL events/getObjects）と登録判定
+// 受け取り判定に必要な読み取りは、campaign 取得（GraphQL object listing/getObjects）と登録判定
 // （listOwnedObjects/getObjects）の両方を使う。claim 画面と同じく、両者を満たす
 // 1 つの read client にまとめて扱う。
 type HomeBannerReadClient = ClaimCampaignReadClient & MembershipPassReadClient;
@@ -105,7 +105,7 @@ export function useClaimBannerCta(): ClaimBannerCta | null {
     });
 }
 
-// イベント検索は GraphQL event client へ回し、object 読み取りは dapp-kit の
+// Campaign object listing は GraphQL read client へ回し、object 読み取りは dapp-kit の
 // Sui client へ委譲する。dapp-kit メソッドの this を保つため call で束ねる。
 function toHomeBannerReadClient(client: unknown): HomeBannerReadClient {
     if (typeof client !== "object" || client === null) {
@@ -120,6 +120,7 @@ function toHomeBannerReadClient(client: unknown): HomeBannerReadClient {
     const eventClient = createGraphqlEventClient();
     return {
         queryMoveEvents: (input) => eventClient.queryMoveEvents(input),
+        queryObjectsByType: (input) => eventClient.queryObjectsByType(input),
         getObjects: (input) => getObjects.call(client, input),
         listOwnedObjects: (input) => listOwnedObjects.call(client, input),
     };

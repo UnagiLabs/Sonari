@@ -16,18 +16,21 @@
 //! The deployed object ids default to the testnet deployment resolved from
 //! `contracts/Published.toml`; override them via env vars when the deployment
 //! changes:
-//!   SONARI_PACKAGE_ID, SONARI_MEMBERSHIP_REGISTRY_ID, SONARI_MEMBER_CELL.
+//!   SONARI_PACKAGE_ID, SONARI_MEMBERSHIP_REGISTRY_ID, SONARI_CELL_COUNT_INDEX_ID,
+//!   SONARI_MEMBER_CELL.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use census_tee::graphql::{CensusGraphqlClient, SuiGraphqlNetwork};
 use census_tee::{AffectedCell, AffectedCellsArtifact, CensusInputBundle};
 
-// Current testnet deployment (contracts/Published.toml, resolved 2026-06-18).
+// Current testnet deployment (contracts/Published.toml, resolved 2026-07-30).
 const DEFAULT_PACKAGE_ID: &str =
-    "0x03a2031d69d0f5eb2ce33753860aed3fd6256659b904394c9eae1a48350b12c0";
+    "0x47168d76cc3b6762d564c318a7c0f67d39d05787d65c525ed2bcd9b547c14616";
 const DEFAULT_MEMBERSHIP_REGISTRY_ID: &str =
-    "0xd11600ccd2a106bf33479e431fb20fa6fb9e1ee025c8cddbc70598bb2e1d4b20";
+    "0xe4ecad2fd561802562be7408a59724837ac87f86557876a1b2d10cd6aa40c7c8";
+const DEFAULT_CELL_COUNT_INDEX_ID: &str =
+    "0xc1f82a78cda8dd22dd233fbbb2bda67f72598f37d9697e3c41d85e20e5e881c0";
 // The single member currently registered on-chain (Tokyo, active_count = 1).
 const DEFAULT_MEMBER_CELL: &str = "608818980815110143";
 // Noto Peninsula 2024 fixture (us6000m0xl).
@@ -86,6 +89,7 @@ fn bundle(occurred_at_ms: u64, cells: Vec<(&str, u64)>) -> CensusInputBundle {
             "SONARI_MEMBERSHIP_REGISTRY_ID",
             DEFAULT_MEMBERSHIP_REGISTRY_ID,
         ),
+        cell_count_index_id: env_or("SONARI_CELL_COUNT_INDEX_ID", DEFAULT_CELL_COUNT_INDEX_ID),
         affected_cells: affected_cells(cells),
     }
 }

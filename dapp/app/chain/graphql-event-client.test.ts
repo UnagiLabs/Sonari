@@ -188,4 +188,127 @@ describe("createGraphqlEventClient", () => {
             "Malformed GraphQL event response",
         );
     });
+
+    it("queries objects by type with forward pagination and normalizes object IDs", async () => {
+        const firstObjectId = `0x${"AA".repeat(32)}`;
+        const secondObjectId = `0x${"bb".repeat(32)}`;
+        const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body)) as {
+                query: string;
+                variables: { type: string; first: number; after?: string | null };
+            };
+            expect(body.query).toContain(
+                "objects(filter: { type: $type }, first: $first, after: $after)",
+            );
+            expect(body.variables).toEqual({
+                type: "0x1::campaign::Campaign",
+                first: 2,
+                after: "cursor-1",
+            });
+            return new Response(
+                JSON.stringify({
+                    data: {
+                        objects: {
+                            nodes: [{ address: firstObjectId }, { address: secondObjectId }],
+                            pageInfo: {
+                                hasNextPage: true,
+                                endCursor: "cursor-2",
+                            },
+                        },
+                    },
+                }),
+            );
+        });
+        const client = createGraphqlEventClient({ network: "testnet", fetch: fetchMock });
+
+        await expect(
+            client.queryObjectsByType({
+                type: "0x1::campaign::Campaign",
+                cursor: "cursor-1",
+                limit: 2,
+            }),
+        ).resolves.toEqual({
+            data: [`0x${"aa".repeat(32)}`, secondObjectId],
+            hasNextPage: true,
+            nextCursor: "cursor-2",
+        });
+    });
+
+    it("caps the GraphQL object page size at 50", async () => {
+        const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body)) as {
+                variables: { first: number };
+            };
+            expect(body.variables.first).toBe(50);
+            return new Response(
+                JSON.stringify({
+                    data: {
+                        objects: {
+                            nodes: [],
+                            pageInfo: { hasNextPage: false, endCursor: null },
+                        },
+                    },
+                }),
+            );
+        });
+        const client = createGraphqlEventClient({ network: "testnet", fetch: fetchMock });
+
+        await expect(
+            client.queryObjectsByType({ type: "0x1::campaign::Campaign", limit: 100 }),
+        ).resolves.toEqual({ data: [], hasNextPage: false, nextCursor: null });
+    });
+
+    it.each([0, -1, 1.5])("rejects an invalid object page size: %s", async (limit) => {
+        const fetchMock = vi.fn();
+        const client = createGraphqlEventClient({ network: "testnet", fetch: fetchMock });
+
+        await expect(
+            client.queryObjectsByType({ type: "0x1::campaign::Campaign", limit }),
+        ).rejects.toThrow("GraphQL object query limit must be a positive integer");
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects GraphQL object errors", async () => {
+        const client = createGraphqlEventClient({
+            network: "testnet",
+            fetch: vi.fn(
+                async () =>
+                    new Response(
+                        JSON.stringify({ errors: [{ message: "object index unavailable" }] }),
+                    ),
+            ),
+        });
+        await expect(
+            client.queryObjectsByType({ type: "0x1::campaign::Campaign" }),
+        ).rejects.toThrow("object index unavailable");
+    });
+
+    it.each([
+        { data: null },
+        { data: { objects: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } } } },
+        {
+            data: {
+                objects: {
+                    nodes: [{ address: "0xabc" }],
+                    pageInfo: { hasNextPage: false, endCursor: "cursor" },
+                },
+            },
+        },
+        {
+            data: {
+                objects: {
+                    nodes: [null],
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                },
+            },
+        },
+    ])("rejects malformed object responses", async (body) => {
+        const client = createGraphqlEventClient({
+            network: "testnet",
+            fetch: vi.fn(async () => new Response(JSON.stringify(body))),
+        });
+        await expect(
+            client.queryObjectsByType({ type: "0x1::campaign::Campaign" }),
+        ).rejects.toThrow("Malformed GraphQL object response");
+    });
 });

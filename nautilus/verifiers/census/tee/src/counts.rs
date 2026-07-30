@@ -18,6 +18,7 @@ pub struct CensusInputBundle {
     pub campaign_id: String,
     pub disaster_event_id: String,
     pub membership_registry_id: String,
+    pub cell_count_index_id: String,
     pub affected_cells: AffectedCellsArtifact,
 }
 
@@ -137,6 +138,11 @@ pub fn process_floor_census_input_bundle(
     snapshot: CensusResolvedSnapshot,
 ) -> Result<FloorCensusResult, CensusError> {
     validate_census_input_bundle_context(bundle)?;
+    if bundle.cell_count_index_id != snapshot.cell_count_index_id {
+        return Err(CensusError::InvalidPayload(
+            "resolved cell_count_index_id does not match input bundle".to_owned(),
+        ));
+    }
     process_floor_census_bundle(&CensusSnapshotBundle {
         event_uid: bundle.event_uid.clone(),
         event_revision: bundle.event_revision,
@@ -146,7 +152,7 @@ pub fn process_floor_census_input_bundle(
         campaign_id: bundle.campaign_id.clone(),
         disaster_event_id: bundle.disaster_event_id.clone(),
         membership_registry_id: bundle.membership_registry_id.clone(),
-        cell_count_index_id: snapshot.cell_count_index_id,
+        cell_count_index_id: bundle.cell_count_index_id.clone(),
         census_checkpoint: snapshot.census_checkpoint,
         affected_cells: bundle.affected_cells.clone(),
         counted_cells: snapshot.counted_cells,
@@ -158,6 +164,7 @@ pub fn validate_census_input_bundle_context(bundle: &CensusInputBundle) -> Resul
     validate_object_id(&bundle.campaign_id, "campaign_id")?;
     validate_object_id(&bundle.disaster_event_id, "disaster_event_id")?;
     validate_object_id(&bundle.membership_registry_id, "membership_registry_id")?;
+    validate_object_id(&bundle.cell_count_index_id, "cell_count_index_id")?;
     validate_affected_cells_root(
         &bundle.event_uid,
         bundle.event_revision,
@@ -544,6 +551,7 @@ mod tests {
             campaign_id: snapshot_bundle.campaign_id.clone(),
             disaster_event_id: snapshot_bundle.disaster_event_id.clone(),
             membership_registry_id: snapshot_bundle.membership_registry_id.clone(),
+            cell_count_index_id: snapshot_bundle.cell_count_index_id.clone(),
             affected_cells: snapshot_bundle.affected_cells.clone(),
         };
         let snapshot = CensusResolvedSnapshot {
@@ -560,6 +568,33 @@ mod tests {
         );
         assert_eq!(result.census_checkpoint, snapshot_bundle.census_checkpoint);
         assert_eq!(result.registered_members_by_band, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn process_floor_census_input_bundle_rejects_resolved_index_mismatch() {
+        let snapshot_bundle = valid_bundle();
+        let input = CensusInputBundle {
+            package_id: format!("0x{}", "aa".repeat(32)),
+            event_uid: snapshot_bundle.event_uid.clone(),
+            event_revision: snapshot_bundle.event_revision,
+            occurred_at_ms: snapshot_bundle.occurred_at_ms,
+            affected_cells_root: snapshot_bundle.affected_cells_root.clone(),
+            issued_at_ms: snapshot_bundle.issued_at_ms,
+            campaign_id: snapshot_bundle.campaign_id.clone(),
+            disaster_event_id: snapshot_bundle.disaster_event_id.clone(),
+            membership_registry_id: snapshot_bundle.membership_registry_id.clone(),
+            cell_count_index_id: snapshot_bundle.cell_count_index_id.clone(),
+            affected_cells: snapshot_bundle.affected_cells.clone(),
+        };
+        let snapshot = CensusResolvedSnapshot {
+            cell_count_index_id: format!("0x{}", "77".repeat(32)),
+            census_checkpoint: snapshot_bundle.census_checkpoint,
+            counted_cells: snapshot_bundle.counted_cells.clone(),
+        };
+
+        let error = process_floor_census_input_bundle(&input, snapshot).unwrap_err();
+
+        assert!(error.to_string().contains("cell_count_index_id"));
     }
 
     #[test]

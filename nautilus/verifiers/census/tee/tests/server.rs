@@ -168,6 +168,7 @@ fn valid_bundle_json() -> serde_json::Value {
         "campaign_id": format!("0x{}", "44".repeat(32)),
         "disaster_event_id": format!("0x{}", "55".repeat(32)),
         "membership_registry_id": format!("0x{}", "22".repeat(32)),
+        "cell_count_index_id": format!("0x{}", "33".repeat(32)),
         "package_id": format!("0x{}", "99".repeat(32)),
         "affected_cells": affected_cells
     })

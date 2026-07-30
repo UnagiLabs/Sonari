@@ -3,12 +3,12 @@
 //
 // 背景:
 //   アプリの dApp Kit クライアントは gRPC（SuiGrpcClient）。gRPC には
-//   イベント検索が無い。一方 claim のキャンペーン発見は
-//   CampaignCreated イベントの検索に依存している。そのため gRPC クライアントを
-//   そのまま渡すと読み取りが失敗する（描画時に throw していた）。
+//   イベント検索と type 指定の object listing が無い。一方 claim のキャンペーン発見は
+//   CampaignCreated イベント検索と Campaign object listing の移行口を必要としている。
+//   そのため gRPC クライアントをそのまま渡すと読み取りが失敗する（描画時に throw していた）。
 //
 // 方針（A）:
-//   - イベント検索は GraphQL クライアントへ回す。
+//   - イベント検索と type 指定の object listing は GraphQL クライアントへ回す。
 //   - getObjects / listOwnedObjects は gRPC クライアントをそのまま使う
 //     （形は ClaimCampaignReadClient / MembershipPassReadClient と一致するため
 //     変換不要・既存パーサに影響しない）。
@@ -20,18 +20,23 @@
 //
 // 将来（B）:
 //   コントラクトにキャンペーン登録簿を追加できれば、gRPC の listDynamicFields 等で
-//   発見できるようになり GraphQL event query を外せる。その際の差し替え口はこの 1 ファイル。
+//   発見できるようになり GraphQL の discovery query を外せる。その際の差し替え口はこの 1 ファイル。
 // ---------------------------------------------------------------------------
 
-import { createGraphqlEventClient } from "../chain/graphql-event-client";
+import {
+    createGraphqlEventClient,
+    type ObjectListingQueryClient,
+} from "../chain/graphql-event-client";
 import type { MembershipPassReadClient } from "../mypage/membership-pass-read";
 import type { ClaimCampaignReadClient } from "./claim-campaigns";
 
 /** claim のビューが必要とする読み取りクライアント（campaign + membership pass）。 */
-export type ClaimReadClient = ClaimCampaignReadClient & MembershipPassReadClient;
+export type ClaimReadClient = ClaimCampaignReadClient &
+    MembershipPassReadClient &
+    ObjectListingQueryClient;
 
-/** Move event query だけを提供する最小クライアント（テストで差し替え可能にするため）。 */
-export interface EventQueryClient {
+/** GraphQL discovery query を提供する最小クライアント（テストで差し替え可能にするため）。 */
+export interface EventQueryClient extends ObjectListingQueryClient {
     readonly queryMoveEvents: ClaimCampaignReadClient["queryMoveEvents"];
 }
 
@@ -62,7 +67,7 @@ function callGrpcMethod(client: unknown, name: "getObjects" | "listOwnedObjects"
  * claim 読み取りクライアントを組み立てる。
  *
  * @param grpcClient dApp Kit の現在クライアント（gRPC）。`unknown` で受け、呼び出し時に検証する。
- * @param eventQueryClient イベント検索クライアント（既定は GraphQL）。テストで差し替え可能。
+ * @param eventQueryClient discovery query クライアント（既定は GraphQL）。テストで差し替え可能。
  */
 export function createClaimReadClient(
     grpcClient: unknown,
@@ -70,6 +75,7 @@ export function createClaimReadClient(
 ): ClaimReadClient {
     return {
         queryMoveEvents: (input) => eventQueryClient.queryMoveEvents(input),
+        queryObjectsByType: (input) => eventQueryClient.queryObjectsByType(input),
         // async にして、未準備 grpc の検証失敗を sync throw でなく reject にする
         // （呼び出し側は await + try/catch のため、どちらでも安全だが reject が素直）。
         getObjects: async (input) => callGrpcMethod(grpcClient, "getObjects", input),
