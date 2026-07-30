@@ -1006,6 +1006,60 @@ describe("AWS runner workflow helper", () => {
         ).rejects.toThrow(/source_event_id mismatch/);
     });
 
+    it("rejects finalized S3 TEE results for a different source event before state or relayer work", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const relayer = new RecordingRelayerAdapter();
+        const result = finalizedResultForSourceEvent("us7000other");
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client({ body: JSON.stringify(result) }),
+            repository,
+            relayer,
+            now: () => 1_800_000_001_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "read_result",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result_s3_key: "results/us7000sonari/cmd-123.json",
+            }),
+        ).rejects.toThrow("TEE result source_event_id mismatch");
+        await expect(
+            handler({
+                action: "apply_result",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result_s3_key: "results/us7000sonari/cmd-123.json",
+            }),
+        ).rejects.toThrow("TEE result source_event_id mismatch");
+        await expect(
+            handler({
+                action: "relayer_preview_or_dry_run",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result_s3_key: "results/us7000sonari/cmd-123.json",
+            }),
+        ).rejects.toThrow("TEE result source_event_id mismatch");
+
+        expect(relayer.inputs).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "processing",
+            runner_attempt: 1,
+            relayer_status: null,
+        });
+    });
+
     it("accepts finalized S3 TEE results with hashed event UIDs", async () => {
         const result = finalizedResult();
         if (result.status !== "finalized") {
@@ -3044,6 +3098,21 @@ function finalizedResult(): Extract<TeeCoreResult, { status: "finalized" }> {
         verifier_config_key: 1,
         verifier_config_version: 1,
         enclave_instance_public_key: finalizedPublicKey,
+    };
+}
+
+function finalizedResultForSourceEvent(
+    sourceEventId: string,
+): Extract<TeeCoreResult, { status: "finalized" }> {
+    const result = finalizedResult();
+    const payload: EarthquakeOraclePayload = {
+        ...result.payload,
+        source_event_id: sourceEventId,
+    };
+    return {
+        ...result,
+        payload,
+        payload_bcs_hex: encodeEarthquakeOraclePayloadBcsHex(payload),
     };
 }
 

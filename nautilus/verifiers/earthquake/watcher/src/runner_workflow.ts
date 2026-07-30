@@ -2658,6 +2658,10 @@ function parseTeeResult(text: string, expectedSourceEventId: string): TeeCoreRes
         if (!validation.ok) {
             throw new Error(`invalid finalized TEE result: ${validation.message}`);
         }
+        assertTeeResultSourceEventId(
+            validation.value.payload.source_event_id,
+            expectedSourceEventId,
+        );
         return validation.value;
     }
     if (
@@ -2668,15 +2672,19 @@ function parseTeeResult(text: string, expectedSourceEventId: string): TeeCoreRes
         typeof parsed.source_event_id === "string" &&
         typeof parsed.error_code === "string"
     ) {
-        if (parsed.source_event_id !== expectedSourceEventId) {
-            throw new Error("TEE result source_event_id mismatch");
-        }
+        assertTeeResultSourceEventId(parsed.source_event_id, expectedSourceEventId);
         if (!isValidNonFinalizedTeeErrorCode(parsed.status, parsed.error_code)) {
             throw new Error("invalid non-finalized TEE result error_code");
         }
         return parsed as TeeCoreResult;
     }
     throw new Error("invalid TEE result");
+}
+
+function assertTeeResultSourceEventId(actual: string, expected: string): void {
+    if (actual !== expected) {
+        throw new Error("TEE result source_event_id mismatch");
+    }
 }
 
 async function readTeeResultFromS3(
