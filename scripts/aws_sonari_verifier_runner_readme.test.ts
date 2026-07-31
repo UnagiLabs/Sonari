@@ -235,6 +235,18 @@ describe("AWS Sonari verifier runner README", () => {
         expectAdminCallIncludesSender(readme, "disable_earthquake_verifier_config");
     });
 
+    it("documents CheckpointTimeout recovery and fail-closed PCR read-back conditions", async () => {
+        const readme = await readRunnerDocs();
+
+        expectContainsAll(readme, [
+            "`CheckpointTimeout` は transaction が失敗した証拠ではありません",
+            "対象 family の PCR0/1/2 が on-chain `VerifierRegistry` で期待値と一致した場合だけ継続",
+            "PCR 不一致、config 未発見、read-back 失敗、不正 JSON、通常エラーは fail-closed",
+            "通常エラーでは read-back による成功扱いをしません",
+            "登録後の read-only PCR 検証は最終防御線として残します",
+        ]);
+    });
+
     it("documents existing AdminCap-gated membership identity PCR config entrypoints", async () => {
         const readme = await readRunnerDocs();
 
