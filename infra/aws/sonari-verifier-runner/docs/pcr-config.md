@@ -9,7 +9,9 @@ Earthquake verifier、membership identity verifier、census verifier の PCR con
 これを構造的に消すため、**dev/testnet 専用**として `aws-sonari-verifier-runner-dev` deploy workflow（`.github/workflows/aws-sonari-verifier-runner-dev-deploy.yml`）が、EIF ビルド・CloudFormation デプロイの後に `scripts/register-verifier-configs.sh` を自動実行し、新 EIF の PCR を on-chain に再登録します。これにより **手動の `register-verifier-configs.sh` 実行は dev では不要**になりました。
 
 - workflow は EIF measurement から `EARTHQUAKE_EIF_PCR0/1/2`、`MEMBERSHIP_IDENTITY_EIF_PCR0/1/2`、`CENSUS_EIF_PCR0/1/2` を読み、スクリプトの env fallback 経由で渡します。`register-verifier-configs.sh` は idempotent（create→abort9→update fallback）なので再実行は安全です。
-- 再登録後に on-chain config の PCR が新 EIF と一致するかを read-only（AdminCap 不要）で検証し、不一致なら fail します。サイレントな部分失敗を検出するためです。
+- Sui CLI の `CheckpointTimeout` は transaction が失敗した証拠ではありません。`register-verifier-configs.sh` は create / update 後の `CheckpointTimeout` に限り、対象 family の PCR0/1/2 が on-chain `VerifierRegistry` で期待値と一致した場合だけ継続します。
+- PCR 不一致、config 未発見、read-back 失敗、不正 JSON、通常エラーは fail-closed で失敗します。通常エラーでは read-back による成功扱いをしません。
+- 再登録後に on-chain config の PCR が新 EIF と一致するかを read-only（AdminCap 不要）で検証し、不一致なら fail します。サイレントな部分失敗を検出するためです。登録後の read-only PCR 検証は最終防御線として残します。
 - CI に投入する admin 鍵は **dev/testnet 専用の使い捨て鍵**（GitHub Secret `SONARI_DEV_ADMIN_PRIVATE_KEY`、環境 `aws-sonari-verifier-runner-dev` スコープ）で、本番 AdminCap とは別物です。漏洩時の被害は testnet に限定されます。AdminCap object id は `contracts/Published.toml` の package id と Sui events から workflow が導出します。
 - secret は環境スコープ＋手動 `workflow_dispatch` 限定（GitHub Actions コスト削減のため push トリガーは持たない）で、fork PR からは読めません。鍵は workflow ログに出しません（`set +x` / `::add-mask::` / 後始末の `rm -rf`）。
 - **本番（mainnet）では本方式を使いません。** 本番 AdminCap の秘密鍵や wallet config は CI／AWS（Runner、EC2、Lambda、SSM、AWS Secrets Manager）に絶対に置かず、下記「共通ルール」の手動手順に従ってください。
